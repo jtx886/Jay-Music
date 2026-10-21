@@ -55,7 +55,6 @@ import com.jay.music.util.Validators
 @Composable
 fun LoginScreen(
     onGoRegister: () -> Unit,
-    onGoReset: () -> Unit,
     viewModel: AuthViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -119,7 +118,7 @@ fun LoginScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "登录后同步你的收藏与听歌记录",
+                    text = "登录后管理你的收藏与听歌记录",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -182,13 +181,6 @@ fun LoginScreen(
                     action = "立即注册",
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onGoRegister
-                )
-                Spacer(Modifier.height(10.dp))
-                AuthLinkRow(
-                    prefix = "忘记密码？ ",
-                    action = "重置密码",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onGoReset
                 )
             }
 

@@ -1,105 +1,71 @@
 package com.jay.music.data.repository
 
 import com.jay.music.core.SessionManager
+import com.jay.music.data.local.LocalAccountStore
 import com.jay.music.data.model.ApiResult
-import com.jay.music.data.model.AuthSession
 import com.jay.music.data.model.User
-import com.jay.music.data.remote.JayMusicApiService
-import com.jay.music.data.remote.dto.ApiResponse
-import com.jay.music.data.remote.dto.LoginRequest
-import com.jay.music.data.remote.dto.RegisterRequest
-import com.jay.music.data.remote.dto.ResetPasswordRequest
-import com.jay.music.data.remote.dto.SendCodeRequest
-import com.jay.music.data.remote.dto.UserDto
-import java.io.IOException
+import java.util.UUID
 
 /**
- * 账号仓库：验证码、注册、登录、重置密码、用户信息。
+ * 本机账号仓库（无后端）：
+ * 注册、登录全部在本机完成，不依赖网络与邮件验证码。
  */
 class AuthRepository(
-    private val api: JayMusicApiService,
+    private val accountStore: LocalAccountStore,
     private val sessionManager: SessionManager
 ) {
 
-    suspend fun sendCode(email: String, scene: String): ApiResult<Unit> =
-        call { api.sendCode(SendCodeRequest(email, scene)) }
-            .mapData { }
+    /** 本机是否已注册过账号 */
+    fun hasAccount(): Boolean = accountStore.hasAccount()
+
+    /** 本机账号用户名（用于登录页提示） */
+    fun localUsername(): String? = accountStore.username()
 
     /**
-     * 注册成功后不直接建立登录态：业务要求注册完成自动跳回登录页。
-     * 后端仍会返回 token 与基础信息，这里只做校验并回传给界面。
+     * 注册：仅保存用户名与密码哈希到本机加密存储。
      */
-    suspend fun register(
-        username: String,
-        email: String,
-        password: String,
-        code: String
-    ): ApiResult<AuthSession> {
-        val result = call { api.register(RegisterRequest(username, email, password, code)) }
-        if (result.success) {
-            val data = result.data
-            val user = data?.user?.toUser()
-            val token = data?.token
-            if (token.isNullOrBlank() || user == null) {
-                return ApiResult(false, "注册信息解析失败，请稍后重试")
-            }
-            return ApiResult(true, result.message, AuthSession(token, user))
+    suspend fun register(username: String, password: String): ApiResult<Unit> {
+        if (accountStore.hasAccount()) {
+            return ApiResult(false, "本机已有账号，请直接登录")
         }
-        return ApiResult(false, result.message)
+        val saved = runCatching { accountStore.register(username, password) }
+            .getOrDefault(false)
+        return if (saved) {
+            ApiResult(true, "注册成功，请登录")
+        } else {
+            ApiResult(false, "账号保存失败，请稍后重试")
+        }
     }
 
-    suspend fun login(username: String, password: String): ApiResult<AuthSession> {
-        val result = call { api.login(LoginRequest(username, password)) }
-        if (result.success) {
-            val data = result.data
-            val user = data?.user?.toUser()
-            val token = data?.token
-            if (token.isNullOrBlank() || user == null) {
-                return ApiResult(false, "登录信息解析失败，请稍后重试")
-            }
-            sessionManager.saveSession(token, user)
-            return ApiResult(true, result.message)
+    /**
+     * 登录：校验本机账号后写入加密会话。
+     */
+    suspend fun login(username: String, password: String): ApiResult<Unit> {
+        val storedUsername = accountStore.username()
+            ?: return ApiResult(false, "本机还没有账号，请先注册")
+
+        if (!accountStore.verify(username, password)) {
+            return ApiResult(false, "用户名或密码错误")
         }
-        return ApiResult(false, result.message)
+
+        val user = User(
+            id = 1L,
+            username = storedUsername,
+            email = "",
+            avatar = null
+        )
+        sessionManager.saveSession(UUID.randomUUID().toString(), user)
+        return ApiResult(true, "登录成功")
     }
 
-    suspend fun resetPassword(email: String, code: String, newPassword: String): ApiResult<Unit> =
-        call { api.resetPassword(ResetPasswordRequest(email, code, newPassword)) }
-            .mapData { }
-
+    /**
+     * 本地账号信息直接从会话读取，无需网络请求。
+     */
     suspend fun fetchUser(): ApiResult<User> {
-        val result = call { api.getUser() }
-        if (result.success) {
-            val user = result.data?.toUser()
-            if (user != null) {
-                sessionManager.updateUser(user)
-                return ApiResult(true, result.message, user)
-            }
-        }
-        return ApiResult(false, result.message)
+        val user = sessionManager.user.value
+            ?: return ApiResult(false, "登录状态已失效，请重新登录")
+        return ApiResult(true, "获取成功", user)
     }
 
     fun logout() = sessionManager.logout()
-
-    // ------------------------- 工具 -------------------------
-
-    private fun UserDto.toUser() = User(id = id, username = username, email = email, avatar = avatar)
-
-    private suspend fun <T> call(block: suspend () -> ApiResponse<T>): ApiResult<T> {
-        return try {
-            val response = block()
-            if (response.isSuccess) {
-                ApiResult(true, response.message ?: "操作成功", response.data)
-            } else {
-                ApiResult(false, response.message ?: "请求失败，请稍后重试")
-            }
-        } catch (e: IOException) {
-            ApiResult(false, "网络连接失败，请检查网络后重试")
-        } catch (e: Exception) {
-            ApiResult(false, e.message ?: "服务异常，请稍后重试")
-        }
-    }
-
-    private fun <T, R> ApiResult<T>.mapData(transform: (T?) -> R): ApiResult<R> =
-        ApiResult(success = success, message = message, data = transform(data))
 }

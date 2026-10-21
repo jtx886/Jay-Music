@@ -2,7 +2,6 @@ package com.jay.music.ui.screens.auth
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,23 +9,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AlternateEmail
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Pin
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,13 +44,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jay.music.ui.components.AnimatedAppBackground
 import com.jay.music.ui.components.GlassCard
 import com.jay.music.ui.components.GradientButton
-import com.jay.music.ui.components.RoundedIconButton
 import com.jay.music.ui.components.ScreenTopBar
 import com.jay.music.ui.theme.BrandGreen
 import com.jay.music.ui.theme.BrandPurple
 import com.jay.music.util.Validators
 
-/** 注册页 */
+/** 注册页（本地账号，无需邮箱验证码） */
 @Composable
 fun RegisterScreen(
     onBack: () -> Unit,
@@ -68,51 +61,33 @@ fun RegisterScreen(
     val focusManager = LocalFocusManager.current
 
     var username by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
-    var code by rememberSaveable { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
 
     var usernameError by remember { mutableStateOf<String?>(null) }
-    var emailError by remember { mutableStateOf<String?>(null) }
     var passwordError by remember { mutableStateOf<String?>(null) }
     var confirmError by remember { mutableStateOf<String?>(null) }
-    var codeError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
                 is AuthEvent.Message -> Toast.makeText(context, event.text, Toast.LENGTH_SHORT).show()
                 AuthEvent.Registered -> onRegistered()
-                AuthEvent.PasswordReset -> Unit
             }
         }
     }
 
-    fun requestCode() {
-        val error = Validators.emailError(email)
-        emailError = error
-        if (error == null) viewModel.sendCode(email, "register")
-    }
-
     fun submit() {
         usernameError = Validators.usernameError(username)
-        emailError = Validators.emailError(email)
         passwordError = Validators.passwordError(password)
         confirmError = Validators.confirmPasswordError(password, confirmPassword)
-        codeError = Validators.codeError(code)
-        val valid = listOf(
-            usernameError, emailError, passwordError, confirmError, codeError
-        ).all { it == null }
+        val valid = listOf(usernameError, passwordError, confirmError).all { it == null }
         if (valid) {
             focusManager.clearFocus()
-            viewModel.register(username, email, password, code)
+            viewModel.register(username, password)
         }
     }
-
-    val countdown = uiState.countdown
-    val codeButtonEnabled = countdown == 0 && !uiState.sendingCode
 
     AnimatedAppBackground(accentColors = listOf(BrandPurple, BrandGreen)) {
         Column(
@@ -136,7 +111,7 @@ fun RegisterScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "开启属于你的音乐宇宙",
+                    text = "账号与数据仅保存在本机",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -150,19 +125,6 @@ fun RegisterScreen(
                         placeholder = "2-20 个字符",
                         leadingIcon = Icons.Rounded.Person,
                         error = usernameError,
-                        imeAction = ImeAction.Next,
-                        onImeAction = { focusManager.moveFocus(FocusDirection.Down) }
-                    )
-                    Spacer(Modifier.height(14.dp))
-
-                    AuthTextField(
-                        value = email,
-                        onValueChange = { email = it; emailError = null },
-                        label = "邮箱地址",
-                        placeholder = "用于接收验证码",
-                        leadingIcon = Icons.Rounded.AlternateEmail,
-                        error = emailError,
-                        keyboardType = KeyboardType.Email,
                         imeAction = ImeAction.Next,
                         onImeAction = { focusManager.moveFocus(FocusDirection.Down) }
                     )
@@ -201,46 +163,9 @@ fun RegisterScreen(
                         leadingIcon = Icons.Rounded.Lock,
                         error = confirmError,
                         keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Next,
+                        imeAction = ImeAction.Done,
                         visualTransformation = if (showPassword) VisualTransformation.None
                         else PasswordVisualTransformation(),
-                        onImeAction = { focusManager.moveFocus(FocusDirection.Down) }
-                    )
-                    Spacer(Modifier.height(14.dp))
-
-                    AuthTextField(
-                        value = code,
-                        onValueChange = {
-                            code = it.filter { char -> char.isDigit() }.take(6)
-                            codeError = null
-                        },
-                        label = "邮箱验证码",
-                        placeholder = "6 位数字验证码",
-                        leadingIcon = Icons.Rounded.Pin,
-                        error = codeError,
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done,
-                        trailingContent = {
-                            TextButton(
-                                onClick = { requestCode() },
-                                enabled = codeButtonEnabled
-                            ) {
-                                if (uiState.sendingCode) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                } else {
-                                    Text(
-                                        text = if (countdown > 0) "${countdown}s" else "获取验证码",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (codeButtonEnabled) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        },
                         onImeAction = { submit() }
                     )
 

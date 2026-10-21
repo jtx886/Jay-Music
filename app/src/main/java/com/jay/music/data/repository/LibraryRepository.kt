@@ -1,112 +1,81 @@
 package com.jay.music.data.repository
 
+import android.content.Context
+import android.content.SharedPreferences
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.jay.music.data.model.LibrarySong
-import com.jay.music.data.model.MusicSource
 import com.jay.music.data.model.Song
-import com.jay.music.data.remote.JayMusicApiService
-import com.jay.music.data.remote.dto.ApiResponse
-import com.jay.music.data.remote.dto.FavoriteActionRequest
-import com.jay.music.data.remote.dto.HistoryActionRequest
-import com.jay.music.data.remote.dto.SongDto
-import java.io.IOException
 
 /**
- * 收藏 / 播放历史仓库（数据均由 PHP 后端持久化）。
+ * 收藏 / 播放历史仓库（纯本地持久化）：
+ * 数据以 JSON 形式保存在普通 SharedPreferences 中，不依赖任何后端服务。
  */
-class LibraryRepository(private val api: JayMusicApiService) {
+class LibraryRepository(context: Context) {
 
-    suspend fun loadFavorites(): Result<List<LibrarySong>> = call {
-        val response = api.getFavorites()
-        if (response.isSuccess) {
-            Result.success(response.data?.songs.orEmpty().map { it.toLibrarySong() })
-        } else {
-            Result.failure(IllegalStateException(response.message ?: "获取收藏失败"))
+    private val gson = Gson()
+    private val prefs: SharedPreferences = context.applicationContext
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val listType = object : TypeToken<List<LibrarySong>>() {}.type
+    private val lock = Any()
+
+    suspend fun loadFavorites(): Result<List<LibrarySong>> = runCatching {
+        read(KEY_FAVORITES)
+    }
+
+    suspend fun addFavorite(song: Song): Result<Unit> = runCatching {
+        synchronized(lock) {
+            val list = read(KEY_FAVORITES)
+                .filterNot { it.song.key == song.key }
+            write(KEY_FAVORITES, listOf(LibrarySong(song, System.currentTimeMillis())) + list)
         }
     }
 
-    suspend fun addFavorite(song: Song): Result<Unit> = action {
-        api.updateFavorite(
-            FavoriteActionRequest(
-                action = "add",
-                songId = song.id,
-                songName = song.name,
-                artist = song.artist,
-                album = song.album,
-                coverUrl = song.coverUrl,
-                source = song.source.name,
-                duration = song.durationMs
-            )
-        )
-    }
-
-    suspend fun removeFavorite(song: Song): Result<Unit> = action {
-        api.updateFavorite(
-            FavoriteActionRequest(
-                action = "remove",
-                songId = song.id,
-                source = song.source.name
-            )
-        )
-    }
-
-    suspend fun loadHistory(): Result<List<LibrarySong>> = call {
-        val response = api.getHistory()
-        if (response.isSuccess) {
-            val records = response.data?.records ?: response.data?.songs.orEmpty()
-            Result.success(records.map { it.toLibrarySong() })
-        } else {
-            Result.failure(IllegalStateException(response.message ?: "获取历史失败"))
+    suspend fun removeFavorite(song: Song): Result<Unit> = runCatching {
+        synchronized(lock) {
+            val list = read(KEY_FAVORITES)
+                .filterNot { it.song.key == song.key }
+            write(KEY_FAVORITES, list)
         }
     }
 
-    suspend fun addHistory(song: Song): Result<Unit> = action {
-        api.updateHistory(
-            HistoryActionRequest(
-                action = "add",
-                songId = song.id,
-                songName = song.name,
-                artist = song.artist,
-                album = song.album,
-                coverUrl = song.coverUrl,
-                source = song.source.name,
-                duration = song.durationMs
-            )
-        )
+    suspend fun loadHistory(): Result<List<LibrarySong>> = runCatching {
+        read(KEY_HISTORY)
     }
 
-    suspend fun clearHistory(): Result<Unit> = action {
-        api.updateHistory(HistoryActionRequest(action = "clear"))
+    suspend fun addHistory(song: Song): Result<Unit> = runCatching {
+        synchronized(lock) {
+            val list = read(KEY_HISTORY)
+                .filterNot { it.song.key == song.key }
+            val updated = listOf(LibrarySong(song, System.currentTimeMillis())) + list
+            write(KEY_HISTORY, updated.take(HISTORY_LIMIT))
+        }
     }
 
-    // ------------------------- 工具 -------------------------
-
-    private suspend fun action(block: suspend () -> ApiResponse<Any?>): Result<Unit> = call {
-        val response = block()
-        if (response.isSuccess) Result.success(Unit)
-        else Result.failure(IllegalStateException(response.message ?: "操作失败"))
+    suspend fun clearHistory(): Result<Unit> = runCatching {
+        synchronized(lock) {
+            prefs.edit().remove(KEY_HISTORY).apply()
+        }
     }
 
-    private suspend fun <T> call(block: suspend () -> Result<T>): Result<T> = try {
-        block()
-    } catch (e: IOException) {
-        Result.failure(IllegalStateException("网络连接失败，请稍后重试", e))
-    } catch (e: Exception) {
-        Result.failure(IllegalStateException(e.message ?: "服务异常", e))
+    // ------------------------- 本地读写 -------------------------
+
+    private fun read(key: String): List<LibrarySong> {
+        val raw = prefs.getString(key, null) ?: return emptyList()
+        return runCatching {
+            gson.fromJson<List<LibrarySong>>(raw, listType).orEmpty()
+        }.getOrDefault(emptyList())
     }
 
-    private fun SongDto.toLibrarySong(): LibrarySong {
-        val timestamp = if (playedAt > 0) playedAt else createdAt
-        return LibrarySong(
-            song = Song(
-                id = realId,
-                name = realName,
-                artist = artist ?: "",
-                album = album ?: "",
-                coverUrl = coverUrl ?: "",
-                durationMs = duration,
-                source = MusicSource.from(source)
-            ),
-            timestamp = if (timestamp > 0) timestamp * 1000 else 0L
-        )
+    private fun write(key: String, list: List<LibrarySong>) {
+        prefs.edit().putString(key, gson.toJson(list, listType)).apply()
+    }
+
+    companion object {
+        private const val PREFS_NAME = "jay_music_library"
+        private const val KEY_FAVORITES = "favorites"
+        private const val KEY_HISTORY = "history"
+        private const val HISTORY_LIMIT = 500
     }
 }

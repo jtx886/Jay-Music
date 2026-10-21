@@ -98,13 +98,7 @@ data class LibrarySong(
     val timestamp: Long = 0L
 )
 
-/** 登录态 */
-data class AuthSession(
-    val token: String,
-    val user: User
-)
-
-/** 后端统一响应 */
+/** 统一操作结果 */
 data class ApiResult<T>(
     val success: Boolean,
     val message: String,

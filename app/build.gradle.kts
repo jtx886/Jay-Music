@@ -22,11 +22,8 @@ android {
         applicationId = "com.jay.music"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
-
-        // PHP 后端地址：模拟器访问宿主机使用 10.0.2.2；真机请改为电脑局域网 IP
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8080/\"")
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     signingConfigs {

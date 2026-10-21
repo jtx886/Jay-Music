@@ -1,6 +1,7 @@
 package com.jay.music.core
 
 import android.content.Context
+import com.jay.music.data.local.LocalAccountStore
 import com.jay.music.data.local.SecureStorage
 import com.jay.music.data.local.SettingsStorage
 import com.jay.music.data.remote.NetworkModule
@@ -20,12 +21,13 @@ object ServiceLocator {
 
     val settingsStorage: SettingsStorage by lazy { SettingsStorage(appContext) }
     val secureStorage: SecureStorage by lazy { SecureStorage(appContext) }
+    val localAccountStore: LocalAccountStore by lazy { LocalAccountStore(appContext) }
     val sessionManager: SessionManager by lazy { SessionManager(secureStorage) }
-    val network: NetworkModule by lazy {
-        NetworkModule(sessionManager, com.jay.music.BuildConfig.API_BASE_URL)
+    val network: NetworkModule by lazy { NetworkModule() }
+    val authRepository: AuthRepository by lazy {
+        AuthRepository(localAccountStore, sessionManager)
     }
-    val authRepository: AuthRepository by lazy { AuthRepository(network.api, sessionManager) }
-    val libraryRepository: LibraryRepository by lazy { LibraryRepository(network.api) }
+    val libraryRepository: LibraryRepository by lazy { LibraryRepository(appContext) }
     val musicRepository: MusicRepository by lazy {
         MusicRepository(network.musicSource, settingsStorage)
     }

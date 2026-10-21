@@ -88,7 +88,7 @@ class LibraryViewModel : ViewModel() {
                     _uiState.update { state ->
                         state.copy(favorites = current)
                     }
-                    _events.emit("取消收藏失败，请检查网络")
+                    _events.emit("取消收藏失败，请稍后重试")
                 }
             }
         } else {
@@ -101,7 +101,7 @@ class LibraryViewModel : ViewModel() {
                     _uiState.update { state ->
                         state.copy(favorites = state.favorites.filterNot { it.song.key == song.key })
                     }
-                    _events.emit("收藏失败，请检查网络")
+                    _events.emit("收藏失败，请稍后重试")
                 }
             }
         }
@@ -113,7 +113,7 @@ class LibraryViewModel : ViewModel() {
         viewModelScope.launch {
             repository.clearHistory().onFailure {
                 _uiState.update { it.copy(history = backup) }
-                _events.emit("清空历史失败，请检查网络")
+                _events.emit("清空历史失败，请稍后重试")
             }
         }
     }

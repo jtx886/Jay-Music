@@ -70,7 +70,6 @@ import com.jay.music.ui.components.MiniPlayerHost
 import com.jay.music.ui.components.isDarkTheme
 import com.jay.music.ui.screens.auth.LoginScreen
 import com.jay.music.ui.screens.auth.RegisterScreen
-import com.jay.music.ui.screens.auth.ResetPasswordScreen
 import com.jay.music.ui.screens.home.HomeScreen
 import com.jay.music.ui.screens.library.FavoritesScreen
 import com.jay.music.ui.screens.library.HistoryScreen
@@ -83,14 +82,14 @@ import com.jay.music.ui.theme.BrandMint
 import com.jay.music.ui.theme.BrandPurple
 
 /** 鉴权流程内部页面 */
-private enum class AuthRoute { LOGIN, REGISTER, RESET }
+private enum class AuthRoute { LOGIN, REGISTER }
 
 /** 主流程路由 */
 private enum class RootRoute { MAIN, SEARCH, FAVORITES, HISTORY, PLAYER }
 
 /**
  * 应用根导航：
- * 1. 根据本地加密 token 判断登录态，未登录只能停在登录/注册/重置密码页面
+ * 1. 根据本地登录态判断，未登录只能停在登录/注册页面
  * 2. 登录后进入主界面（首页 / 我的双 Tab）
  * 3. 搜索、收藏、历史、全屏播放器作为独立路由覆盖在主界面之上
  * 4. 全局 SharedTransitionLayout，支撑迷你播放器 -> 全屏播放器的共享元素转场
@@ -132,7 +131,7 @@ fun JayMusicRoot() {
     }
 }
 
-/** 登录 / 注册 / 重置密码 三页路由 */
+/** 登录 / 注册 双页路由 */
 @Composable
 private fun AuthFlow() {
     var route by rememberSaveable { mutableStateOf(AuthRoute.LOGIN) }
@@ -152,16 +151,11 @@ private fun AuthFlow() {
     ) { current ->
         when (current) {
             AuthRoute.LOGIN -> LoginScreen(
-                onGoRegister = { route = AuthRoute.REGISTER },
-                onGoReset = { route = AuthRoute.RESET }
+                onGoRegister = { route = AuthRoute.REGISTER }
             )
             AuthRoute.REGISTER -> RegisterScreen(
                 onBack = { route = AuthRoute.LOGIN },
                 onRegistered = { route = AuthRoute.LOGIN }
-            )
-            AuthRoute.RESET -> ResetPasswordScreen(
-                onBack = { route = AuthRoute.LOGIN },
-                onResetSuccess = { route = AuthRoute.LOGIN }
             )
         }
     }

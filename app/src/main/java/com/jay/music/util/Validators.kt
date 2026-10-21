@@ -1,18 +1,11 @@
 package com.jay.music.util
 
-import android.util.Patterns
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /** 表单校验 */
 object Validators {
-
-    fun emailError(email: String): String? = when {
-        email.isBlank() -> "请输入邮箱地址"
-        !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches() -> "邮箱格式不正确"
-        else -> null
-    }
 
     fun usernameError(username: String): String? = when {
         username.isBlank() -> "请输入用户名"
@@ -30,12 +23,6 @@ object Validators {
     fun confirmPasswordError(password: String, confirm: String): String? = when {
         confirm.isEmpty() -> "请再次输入密码"
         confirm != password -> "两次输入的密码不一致"
-        else -> null
-    }
-
-    fun codeError(code: String): String? = when {
-        code.isBlank() -> "请输入验证码"
-        !code.matches(Regex("\\d{6}")) -> "验证码为 6 位数字"
         else -> null
     }
 }

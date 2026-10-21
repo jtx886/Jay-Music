@@ -231,7 +231,7 @@ fun ProfileScreen(
         item(key = "version") {
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Jay Music · v1.0.0",
+                text = "Jay Music · v1.1.0",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth(),
@@ -245,7 +245,7 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
             title = { Text("退出登录？") },
-            text = { Text("退出后需要重新登录才能继续使用收藏与历史功能。") },
+            text = { Text("退出后本机的收藏与听歌历史仍会保留，下次登录可继续使用。") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -361,7 +361,7 @@ private fun ProfileHeaderCard(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = user?.email?.ifBlank { "未绑定邮箱" } ?: "未绑定邮箱",
+                        text = "本地账号 · 数据仅保存在本机",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
