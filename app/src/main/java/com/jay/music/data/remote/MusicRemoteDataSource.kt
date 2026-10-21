@@ -18,8 +18,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 第三方音乐接口。
  *
- * 搜索、榜单、音频直链、封面、歌词均使用网易云接口；酷我接口已不可用，
- * 仅保留音频直链与歌词解析，用于兼容历史收藏中的酷我歌曲。
+ * 搜索使用汽水音乐 + 网易云双音源；音频直链、歌词与封面分别走各自平台接口。
  */
 class MusicRemoteDataSource(
     private val gson: Gson,
@@ -33,11 +32,15 @@ class MusicRemoteDataSource(
         .followRedirects(true)
         .followSslRedirects(true)
         .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
-                .header("User-Agent", USER_AGENT)
-                .header("Referer", "https://music.163.com/")
-                .build()
-            chain.proceed(request)
+            val original = chain.request()
+            val builder = original.newBuilder()
+            if (original.header("User-Agent") == null) {
+                builder.header("User-Agent", USER_AGENT)
+            }
+            if (original.url.host.contains("music.163.com")) {
+                builder.header("Referer", "https://music.163.com/")
+            }
+            chain.proceed(builder.build())
         }
         .build()
 
@@ -50,21 +53,21 @@ class MusicRemoteDataSource(
             val root = JsonParser.parseString(text).asJsonObject
             val data = root.getAsJsonObject("data") ?: return@runCatching emptyList()
             val songs = data.getAsJsonArray("songs") ?: return@runCatching emptyList()
-            songs.mapNotNull { element ->
+            val parsed = songs.mapNotNull { element ->
                 val obj = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
                 val id = firstString(obj, "id") ?: return@mapNotNull null
                 val name = firstString(obj, "name") ?: return@mapNotNull null
-                val pic = firstString(obj, "picurl", "pic", "cover")
                 Song(
                     id = id,
                     name = name,
                     artist = firstString(obj, "artistsname", "artist", "singer") ?: "未知歌手",
                     album = firstString(obj, "album") ?: "",
-                    coverUrl = pic ?: coverPrimary(id),
+                    coverUrl = firstString(obj, "picurl", "pic", "cover") ?: "",
                     durationMs = firstLong(obj, "duration") ?: 0L,
                     source = MusicSource.NETEASE
                 )
             }
+            fillNeteaseCovers(parsed)
         }.getOrDefault(emptyList())
     }
 
@@ -75,7 +78,7 @@ class MusicRemoteDataSource(
             val root = JsonParser.parseString(text).asJsonObject
             val data = root.getAsJsonObject("data") ?: return@runCatching emptyList()
             val songs = data.getAsJsonArray("songs") ?: return@runCatching emptyList()
-            songs.mapNotNull { element ->
+            val parsed = songs.mapNotNull { element ->
                 val obj = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
                 val id = firstString(obj, "id") ?: return@mapNotNull null
                 val name = firstString(obj, "name") ?: return@mapNotNull null
@@ -84,11 +87,12 @@ class MusicRemoteDataSource(
                     name = name,
                     artist = firstString(obj, "artistsname", "artist", "singer") ?: "未知歌手",
                     album = firstString(obj, "album") ?: "",
-                    coverUrl = firstString(obj, "picurl", "pic", "cover") ?: coverPrimary(id),
+                    coverUrl = firstString(obj, "picurl", "pic", "cover") ?: "",
                     durationMs = firstLong(obj, "duration") ?: 0L,
                     source = MusicSource.NETEASE
                 )
             }
+            fillNeteaseCovers(parsed)
         }.getOrDefault(emptyList())
     }
 
@@ -101,15 +105,16 @@ class MusicRemoteDataSource(
             val data = root.getAsJsonObject("data") ?: return@runCatching null
             val id = firstString(data, "id") ?: return@runCatching null
             val name = firstString(data, "name") ?: return@runCatching null
-            Song(
+            val song = Song(
                 id = id,
                 name = name,
                 artist = firstString(data, "artistsname", "artist") ?: "未知歌手",
                 album = firstString(data, "album") ?: "",
-                coverUrl = firstString(data, "picurl", "pic") ?: coverPrimary(id),
+                coverUrl = firstString(data, "picurl", "pic") ?: "",
                 durationMs = firstLong(data, "duration") ?: 0L,
                 source = MusicSource.NETEASE
             )
+            fillNeteaseCovers(listOf(song)).firstOrNull()
         }.getOrNull()
     }
 
@@ -132,17 +137,14 @@ class MusicRemoteDataSource(
             "https://music.163.com/song/media/outer/url?id=$songId"
         }
 
-    /** 封面主接口失败时，尝试从备用接口解析 picurl */
+    /** 封面缺失时从网易云官方详情接口补齐 */
     suspend fun resolveNeteaseCover(song: Song): String = withContext(Dispatchers.IO) {
         val direct = song.coverUrl
         if (direct.startsWith("http") && !direct.contains("api.lvxiaodong.com")) {
             return@withContext direct
         }
-        val fallback = getText("https://node.api.xfabe.com/api/wangyi/music?type=json&id=${song.id}")
-        if (fallback != null) {
-            parsePicFromJson(fallback)?.let { return@withContext it }
-        }
-        direct.ifBlank { coverPrimary(song.id) }
+        neteaseCoverMap(listOf(song.id))[song.id]
+            ?: direct.ifBlank { coverPrimary(song.id) }
     }
 
     /** 网易云官方歌词接口：返回 JSON（lrc / tlyric / yrc） */
@@ -150,42 +152,188 @@ class MusicRemoteDataSource(
         getText("https://music.163.com/api/song/lyric?id=$songId&lv=-1&kv=-1&tv=-1&yv=-1")
     }
 
-    // ------------------------- 酷我（仅兼容历史数据） -------------------------
+    // ------------------------- 汽水音乐 -------------------------
 
-    /** 酷我音频直链（老接口已失效，改用 anti 服务解析） */
-    suspend fun resolveKuwoStreamUrl(rid: String, quality: AudioQuality): String =
-        withContext(Dispatchers.IO) {
-            val format = when (quality) {
-                AudioQuality.LOSSLESS, AudioQuality.HIRES -> "flac"
-                else -> "mp3"
+    /** 汽水音乐搜索（Android 端接口，无需登录） */
+    suspend fun searchSoda(query: String): List<Song> = withContext(Dispatchers.IO) {
+        val url = buildUrl(SODA_SEARCH_URL, sodaSearchParams(query)) ?: return@withContext emptyList()
+        val text = getText(url, SODA_HEADERS) ?: return@withContext emptyList()
+        runCatching {
+            val root = JsonParser.parseString(text).asJsonObject
+            val groups = root.getAsJsonArray("result_groups") ?: return@runCatching emptyList()
+            groups.flatMap { group ->
+                val obj = group.takeIf { it.isJsonObject }?.asJsonObject ?: return@flatMap emptyList()
+                val data = obj.getAsJsonArray("data") ?: return@flatMap emptyList()
+                data.mapNotNull { item ->
+                    val entity = item.takeIf { it.isJsonObject }?.asJsonObject
+                        ?.getAsJsonObject("entity") ?: return@mapNotNull null
+                    val track = entity.getAsJsonObject("track") ?: return@mapNotNull null
+                    val id = firstString(track, "id") ?: return@mapNotNull null
+                    val name = firstString(track, "name") ?: return@mapNotNull null
+                    Song(
+                        id = id,
+                        name = name,
+                        artist = sodaArtists(track) ?: "未知歌手",
+                        album = track.getAsJsonObject("album")?.let { firstString(it, "name") } ?: "",
+                        coverUrl = sodaCoverUrl(track.getAsJsonObject("album")?.get("url_cover")),
+                        durationMs = firstLong(track, "duration") ?: 0L,
+                        source = MusicSource.SODA
+                    )
+                }
             }
-            val id = if (rid.startsWith("MUSIC_")) rid else "MUSIC_$rid"
-            val url = "http://antiserver.kuwo.cn/anti.s?type=convert_url&format=$format&response=url&rid=$id"
-            getText(url)?.trim()?.takeIf { it.startsWith("http") }
-                ?: "http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=$id"
+        }.getOrDefault(emptyList())
+    }
+
+    /** 汽水音乐音频直链（H5 SEO 接口 -> 播放信息） */
+    suspend fun resolveSodaStreamUrl(trackId: String, quality: AudioQuality): String =
+        withContext(Dispatchers.IO) {
+            val seoText = sodaSeoText(trackId) ?: return@withContext ""
+            val playInfoUrl = runCatching {
+                JsonParser.parseString(seoText).asJsonObject
+                    .getAsJsonObject("track_player")
+                    ?.get("url_player_info")?.asString
+            }.getOrNull().orEmpty()
+            if (playInfoUrl.isBlank()) return@withContext ""
+
+            val playText = getText(playInfoUrl) ?: return@withContext ""
+            val list = runCatching {
+                JsonParser.parseString(playText).asJsonObject
+                    .getAsJsonObject("Result")
+                    ?.getAsJsonObject("Data")
+                    ?.getAsJsonArray("PlayInfoList")
+            }.getOrNull() ?: return@withContext ""
+
+            val wanted = when (quality) {
+                AudioQuality.STANDARD -> listOf("medium")
+                AudioQuality.HIGHER -> listOf("higher")
+                AudioQuality.EXHIGH -> listOf("highest")
+                AudioQuality.LOSSLESS -> listOf("lossless")
+                AudioQuality.HIRES -> listOf("hi_res", "spatial", "lossless")
+            }
+            val items = list.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject }
+                .filter { firstString(it, "EncryptionMethod").isNullOrBlank() && firstString(it, "PlayAuth").isNullOrBlank() }
+            val picked = wanted.firstNotNullOfOrNull { q ->
+                items.firstOrNull { firstString(it, "Quality") == q }
+            } ?: items.firstOrNull { firstString(it, "Quality") == "highest" }
+                ?: items.firstOrNull()
+            picked?.let { firstString(it, "MainPlayUrl") ?: firstString(it, "BackupPlayUrl") }.orEmpty()
         }
 
-    /** 酷我歌词：接口返回 JSON 的 lrclist，这里转换成标准 LRC 文本 */
-    suspend fun kuwoLyrics(songId: String): String? = withContext(Dispatchers.IO) {
-        val text = getText("https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=$songId")
-            ?: return@withContext null
-        runCatching {
-            val list = JsonParser.parseString(text)
-                .asJsonObject.getAsJsonObject("data")
-                ?.getAsJsonArray("lrclist")
-                ?: return@runCatching null
-            list.mapNotNull { element ->
-                val obj = element.takeIf { it.isJsonObject }?.asJsonObject
-                    ?: return@mapNotNull null
-                val content = firstString(obj, "lineLyric") ?: return@mapNotNull null
-                val seconds = firstString(obj, "time")?.toDoubleOrNull() ?: return@mapNotNull null
-                val totalMs = (seconds * 1000).toLong()
-                val minute = totalMs / 60_000
-                val second = (totalMs % 60_000) / 1_000
-                val centis = (totalMs % 1_000) / 10
-                "[%02d:%02d.%02d]%s".format(minute, second, centis, content)
-            }.joinToString("\n").takeIf { it.isNotBlank() }
-        }.getOrNull()
+    /** 汽水音乐歌词：KRC 逐字格式转换为 YRC 后交给统一解析器 */
+    suspend fun sodaLyrics(trackId: String): String? = withContext(Dispatchers.IO) {
+        val seoText = sodaSeoText(trackId) ?: return@withContext null
+        val content = runCatching {
+            JsonParser.parseString(seoText).asJsonObject
+                .getAsJsonObject("lyric")
+                ?.let { firstString(it, "content") }
+        }.getOrNull() ?: return@withContext null
+        if (content.isBlank()) return@withContext null
+        sodaKrcToYrc(content)
+    }
+
+    private fun sodaSeoText(trackId: String): String? {
+        val url = buildUrl(
+            SODA_SEO_URL,
+            linkedMapOf("track_id" to trackId, "device_platform" to "web")
+        ) ?: return null
+        return getText(url)
+    }
+
+    /** KRC：[start,duration]<offset,duration,0>字 -> YRC：[start,duration](绝对时间,duration,0)字 */
+    private fun sodaKrcToYrc(content: String): String {
+        if (!content.contains("<") || content.contains("[00:")) return content
+        return content.lineSequence().mapNotNull { raw ->
+            val line = raw.trim()
+            val lineMatch = Regex("""^\[(\d+),(\d+)](.*)$""").matchEntire(line)
+                ?: return@mapNotNull null
+            val lineStart = lineMatch.groupValues[1].toLong()
+            val lineDuration = lineMatch.groupValues[2]
+            val body = lineMatch.groupValues[3]
+            val words = Regex("""<(\d+),(\d+),-?\d+>([^<]*)""").findAll(body).map { word ->
+                val offset = word.groupValues[1].toLong()
+                val duration = word.groupValues[2]
+                val text = word.groupValues[3]
+                "(${lineStart + offset},$duration,0)$text"
+            }.joinToString("")
+            val text = words.ifBlank { body.trim() }
+            if (text.isBlank()) return@mapNotNull null
+            "[$lineStart,$lineDuration]$text"
+        }.joinToString("\n").takeIf { it.isNotBlank() } ?: content
+    }
+
+    private fun sodaArtists(track: JsonObject): String? {
+        val artists = track.getAsJsonArray("artists") ?: return null
+        return artists.mapNotNull { element ->
+            element.takeIf { it.isJsonObject }?.asJsonObject?.let { firstString(it, "name") }
+        }.takeIf { it.isNotEmpty() }?.joinToString(",")
+    }
+
+    private fun sodaCoverUrl(cover: JsonElement?): String {
+        val obj = cover?.takeIf { it.isJsonObject }?.asJsonObject ?: return ""
+        val uri = firstString(obj, "uri") ?: return ""
+        val prefix = firstString(obj, "template_prefix") ?: ""
+        val base = obj.getAsJsonArray("urls")?.firstOrNull()
+            ?.takeIf { it.isJsonPrimitive }?.asString ?: return ""
+        return if (prefix.isNotBlank()) "$base$uri~$prefix-resize:960:960.png" else "$base$uri"
+    }
+
+    private fun sodaSearchParams(query: String): Map<String, String> = linkedMapOf(
+        "q" to query,
+        "cursor" to "0",
+        "count" to "20",
+        "aid" to "386088",
+        "device_platform" to "android",
+        "os" to "android",
+        "app_name" to "luna",
+        "version_code" to "100198030",
+        "version_name" to "19.8.0",
+        "channel" to "xiaomi_8478_64",
+        "device_id" to "2204957404565290",
+        "iid" to "2204957404569386",
+        "cdid" to "46556f98-1720-4248-83da-62b74b60b46a",
+        "os_api" to "35",
+        "os_version" to "15",
+        "device_model" to "ABR-AL80",
+        "device_brand" to "HUAWEI",
+        "ac" to "wifi",
+        "language" to "zh"
+    )
+
+    // ------------------------- 网易封面补齐 -------------------------
+
+    private fun fillNeteaseCovers(songs: List<Song>): List<Song> {
+        val missing = songs.filter {
+            it.coverUrl.isBlank() || it.coverUrl.contains("api.lvxiaodong.com")
+        }.map { it.id }
+        if (missing.isEmpty()) return songs
+        val covers = neteaseCoverMap(missing)
+        return songs.map { song ->
+            covers[song.id]?.let { song.copy(coverUrl = it) }
+                ?: song.copy(coverUrl = song.coverUrl.ifBlank { coverPrimary(song.id) })
+        }
+    }
+
+    private fun neteaseCoverMap(ids: List<String>): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        ids.chunked(20).forEach { chunk ->
+            val url = "https://music.163.com/api/song/detail".toHttpUrlOrNull()
+                ?.newBuilder()
+                ?.addQueryParameter("ids", "[${chunk.joinToString(",")}]")
+                ?.build()
+                ?.toString() ?: return@forEach
+            val text = getText(url) ?: return@forEach
+            runCatching {
+                val songs = JsonParser.parseString(text).asJsonObject.getAsJsonArray("songs")
+                    ?: return@runCatching
+                songs.forEach { element ->
+                    val obj = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+                    val id = firstString(obj, "id") ?: return@forEach
+                    val pic = obj.getAsJsonObject("album")?.let { firstString(it, "picUrl") }
+                    if (!pic.isNullOrBlank()) result[id] = pic
+                }
+            }
+        }
+        return result
     }
 
     // ------------------------- 解析工具 -------------------------
@@ -253,13 +401,20 @@ class MusicRemoteDataSource(
         return null
     }
 
-    private fun getText(url: String): String? = runCatching {
-        val request = Request.Builder().url(url).get().build()
-        client.newCall(request).execute().use { response ->
+    private fun getText(url: String, headers: Map<String, String> = emptyMap()): String? = runCatching {
+        val builder = Request.Builder().url(url).get()
+        headers.forEach { (name, value) -> builder.header(name, value) }
+        client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) return@use null
             response.body?.string()
         }
     }.getOrNull()
+
+    private fun buildUrl(base: String, params: Map<String, String>): String? {
+        val builder = base.toHttpUrlOrNull()?.newBuilder() ?: return null
+        params.forEach { (name, value) -> builder.addQueryParameter(name, value) }
+        return builder.build().toString()
+    }
 
     private fun coverPrimary(songId: String): String {
         val encoded = "https://api.lvxiaodong.com/api/wyyjx".toHttpUrlOrNull()
@@ -275,5 +430,14 @@ class MusicRemoteDataSource(
     companion object {
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
+
+        private const val SODA_SEARCH_URL = "https://api.qishui.com/luna/search/track"
+        private const val SODA_SEO_URL = "https://beta-luna.douyin.com/luna/h5/seo_track"
+
+        private val SODA_HEADERS = mapOf(
+            "User-Agent" to
+                "com.luna.music/100198030 (Linux; U; Android 15; zh_CN_#Hans; ABR-AL80; Build/V417IR;tt-ok/3.12.13.19)",
+            "content-type" to "application/json; charset=UTF-8"
+        )
     }
 }

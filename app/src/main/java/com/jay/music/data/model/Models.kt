@@ -5,7 +5,7 @@ import androidx.annotation.Keep
 /** 音源类型 */
 enum class MusicSource(val label: String) {
     NETEASE("网易云"),
-    KUWO("酷我");
+    SODA("汽水");
 
     companion object {
         fun from(value: String?): MusicSource =

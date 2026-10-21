@@ -7,6 +7,8 @@ import com.jay.music.data.model.MusicSource
 import com.jay.music.data.model.Song
 import com.jay.music.data.remote.MusicRemoteDataSource
 import com.jay.music.player.LyricsParser
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 /**
  * 音乐仓库：搜索、榜单、音频直链、封面、歌词。
@@ -23,9 +25,14 @@ class MusicRepository(
         }
     }
 
-    /** 搜索：酷我接口已失效，统一使用网易云音源 */
+    /** 搜索：汽水音乐 + 网易云双音源，合并后按歌名/歌手去重 */
     suspend fun search(query: String): Result<List<Song>> = runCatching {
-        remote.searchNetease(query)
+        coroutineScope {
+            val soda = async { runCatching { remote.searchSoda(query) }.getOrDefault(emptyList()) }
+            val netease = async { runCatching { remote.searchNetease(query) }.getOrDefault(emptyList()) }
+            (soda.await() + netease.await())
+                .distinctBy { "${it.name.lowercase()}|${it.artist.lowercase()}" }
+        }
     }
 
     suspend fun randomSong(): Result<Song> = runCatching {
@@ -35,20 +42,20 @@ class MusicRepository(
     /** 获取可播放的音频直链（主接口失败自动降级） */
     suspend fun streamUrl(song: Song, quality: AudioQuality): String = when (song.source) {
         MusicSource.NETEASE -> remote.resolveNeteaseStreamUrl(song.id, quality)
-        MusicSource.KUWO -> remote.resolveKuwoStreamUrl(song.id, quality)
+        MusicSource.SODA -> remote.resolveSodaStreamUrl(song.id, quality)
     }
 
     /** 获取最终封面地址（失败时返回原始封面/占位） */
     suspend fun coverUrl(song: Song): String = when (song.source) {
         MusicSource.NETEASE -> remote.resolveNeteaseCover(song)
-        MusicSource.KUWO -> song.coverUrl
+        MusicSource.SODA -> song.coverUrl
     }
 
     /** 解析歌词（普通 LRC / YRC 逐字 / 翻译） */
     suspend fun lyrics(song: Song): Lyrics {
         val raw = when (song.source) {
             MusicSource.NETEASE -> remote.neteaseLyrics(song.id)
-            MusicSource.KUWO -> remote.kuwoLyrics(song.id)
+            MusicSource.SODA -> remote.sodaLyrics(song.id)
         } ?: return Lyrics()
         return LyricsParser.parse(raw)
     }

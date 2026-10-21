@@ -373,7 +373,7 @@ class PlaybackController(
     private fun fallbackUrl(song: Song): String = when (song.source) {
         com.jay.music.data.model.MusicSource.NETEASE ->
             "https://music.163.com/song/media/outer/url?id=${song.id}"
-        com.jay.music.data.model.MusicSource.KUWO ->
-            "http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_${song.id}"
+        // 汽水直链需要动态解析，未解析时先置空，播放到该曲时会触发解析
+        com.jay.music.data.model.MusicSource.SODA -> ""
     }
 }

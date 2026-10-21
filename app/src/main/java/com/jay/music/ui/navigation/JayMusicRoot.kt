@@ -170,9 +170,11 @@ private fun MainApp(
 ) {
     var route by rememberSaveable { mutableStateOf(RootRoute.MAIN) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // 记录进入全屏播放器前的页面，退出播放器时回到原页面
+    var playerReturnRoute by rememberSaveable { mutableStateOf(RootRoute.MAIN) }
 
     BackHandler(enabled = route != RootRoute.MAIN) {
-        route = RootRoute.MAIN
+        route = if (route == RootRoute.PLAYER) playerReturnRoute else RootRoute.MAIN
     }
 
     AnimatedAppBackground(accentColors = listOf(BrandGreen, BrandPurple)) {
@@ -193,34 +195,46 @@ private fun MainApp(
                     onOpenSearch = { route = RootRoute.SEARCH },
                     onOpenFavorites = { route = RootRoute.FAVORITES },
                     onOpenHistory = { route = RootRoute.HISTORY },
-                    onOpenPlayer = { route = RootRoute.PLAYER }
+                    onOpenPlayer = {
+                        playerReturnRoute = RootRoute.MAIN
+                        route = RootRoute.PLAYER
+                    }
                 )
                 RootRoute.SEARCH -> SearchScreen(
                     libraryViewModel = libraryViewModel,
                     sharedTransitionScope = sharedScope,
                     animatedVisibilityScope = visibilityScope,
                     onBack = { route = RootRoute.MAIN },
-                    onOpenPlayer = { route = RootRoute.PLAYER }
+                    onOpenPlayer = {
+                        playerReturnRoute = RootRoute.SEARCH
+                        route = RootRoute.PLAYER
+                    }
                 )
                 RootRoute.FAVORITES -> FavoritesScreen(
                     libraryViewModel = libraryViewModel,
                     sharedTransitionScope = sharedScope,
                     animatedVisibilityScope = visibilityScope,
                     onBack = { route = RootRoute.MAIN },
-                    onOpenPlayer = { route = RootRoute.PLAYER }
+                    onOpenPlayer = {
+                        playerReturnRoute = RootRoute.FAVORITES
+                        route = RootRoute.PLAYER
+                    }
                 )
                 RootRoute.HISTORY -> HistoryScreen(
                     libraryViewModel = libraryViewModel,
                     sharedTransitionScope = sharedScope,
                     animatedVisibilityScope = visibilityScope,
                     onBack = { route = RootRoute.MAIN },
-                    onOpenPlayer = { route = RootRoute.PLAYER }
+                    onOpenPlayer = {
+                        playerReturnRoute = RootRoute.HISTORY
+                        route = RootRoute.PLAYER
+                    }
                 )
                 RootRoute.PLAYER -> PlayerScreen(
                     sharedTransitionScope = sharedScope,
                     animatedVisibilityScope = visibilityScope,
                     libraryViewModel = libraryViewModel,
-                    onBack = { route = RootRoute.MAIN }
+                    onBack = { route = playerReturnRoute }
                 )
             }
         }

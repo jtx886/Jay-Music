@@ -267,9 +267,17 @@ fun ProfileScreen(
         item(key = "version") {
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Jay Music · v1.1.1",
+                text = "Jay Music · v1.1.2",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "© 2026 Jay Music 版权归杰同学所有",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )

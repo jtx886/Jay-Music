@@ -23,7 +23,7 @@ data class SearchUiState(
     val error: String? = null
 )
 
-/** 搜索页：网易云音源搜索 */
+/** 搜索页：汽水音乐 + 网易云双音源搜索 */
 class SearchViewModel : ViewModel() {
 
     private val musicRepository = ServiceLocator.musicRepository

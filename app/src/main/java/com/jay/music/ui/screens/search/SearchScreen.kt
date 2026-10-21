@@ -195,7 +195,7 @@ fun SearchScreen(
                     )
                     uiState.hasSearched && uiState.results.isEmpty() -> EmptyState(
                         title = "没有找到相关歌曲",
-                        subtitle = "换个关键词，或尝试切换音源",
+                        subtitle = "换个关键词再试试",
                         icon = Icons.Rounded.SearchOff
                     )
                     uiState.results.isNotEmpty() -> {

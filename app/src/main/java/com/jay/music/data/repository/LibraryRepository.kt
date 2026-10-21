@@ -3,6 +3,8 @@ package com.jay.music.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.jay.music.data.model.LibrarySong
 import com.jay.music.data.model.Song
@@ -64,7 +66,17 @@ class LibraryRepository(context: Context) {
     private fun read(key: String): List<LibrarySong> {
         val raw = prefs.getString(key, null) ?: return emptyList()
         return runCatching {
-            gson.fromJson<List<LibrarySong>>(raw, listType).orEmpty()
+            val array = JsonParser.parseString(raw).asJsonArray
+            // 过滤旧版本遗留的酷我数据，避免已移除的音源枚举反序列化失败
+            val filtered = JsonArray()
+            array.forEach { element ->
+                val source = element.takeIf { it.isJsonObject }?.asJsonObject
+                    ?.getAsJsonObject("song")?.get("source")
+                if (source == null || source.asString != "KUWO") {
+                    filtered.add(element)
+                }
+            }
+            gson.fromJson<List<LibrarySong>>(filtered, listType).orEmpty()
         }.getOrDefault(emptyList())
     }
 
