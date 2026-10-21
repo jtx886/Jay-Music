@@ -90,6 +90,7 @@ fun ProfileScreen(
     val user by ServiceLocator.sessionManager.user.collectAsStateWithLifecycle()
     val libraryState by libraryViewModel.uiState.collectAsStateWithLifecycle()
     val settings by ServiceLocator.settingsStorage.settings.collectAsStateWithLifecycle()
+    val listenMs by ServiceLocator.settingsStorage.listenMs.collectAsStateWithLifecycle()
     val playerState by ServiceLocator.playbackController.state.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -154,6 +155,7 @@ fun ProfileScreen(
                 user = user,
                 favoriteCount = libraryState.favorites.size,
                 historyCount = libraryState.history.size,
+                listenMs = listenMs,
                 onAvatarClick = {
                     avatarPicker.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -351,6 +353,7 @@ private fun ProfileHeaderCard(
     user: User?,
     favoriteCount: Int,
     historyCount: Int,
+    listenMs: Long,
     onAvatarClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(30.dp)
@@ -446,32 +449,64 @@ private fun ProfileHeaderCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 StatItem("收藏", "$favoriteCount", Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(26.dp)
-                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
-                )
+                StatDivider()
                 StatItem("听过", "$historyCount", Modifier.weight(1f))
+                StatDivider()
+                StatItem(
+                    "听歌时长",
+                    formatListenTime(listenMs),
+                    Modifier.weight(1.2f),
+                    valueStyle = MaterialTheme.typography.titleMedium
+                )
             }
         }
     }
 }
 
 @Composable
-private fun StatItem(label: String, value: String, modifier: Modifier = Modifier) {
+private fun StatItem(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueStyle: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.titleLarge
+) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = value,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black
+            style = valueStyle,
+            fontWeight = FontWeight.Black,
+            maxLines = 1
         )
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
     }
+}
+
+/** 统计数据之间的细分隔线 */
+@Composable
+private fun StatDivider() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(26.dp)
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    )
+}
+
+/**
+ * 听歌时长格式化：
+ * 不足 1 小时显示「x分」，超过 1 小时显示「x时xx分」。
+ */
+private fun formatListenTime(ms: Long): String {
+    val totalMinutes = ms / 60_000L
+    if (totalMinutes <= 0L) return "0分"
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) "${hours}时${minutes}分" else "${minutes}分"
 }
 
 @Composable

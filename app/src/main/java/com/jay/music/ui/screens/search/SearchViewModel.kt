@@ -97,6 +97,21 @@ class SearchViewModel : ViewModel() {
         settings.clearSearchHistory()
     }
 
+    /** 离开搜索页时清空本次搜索状态，下次进入是全新的搜索页 */
+    fun resetSession() {
+        searchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                query = "",
+                results = emptyList(),
+                isSearching = false,
+                hasSearched = false,
+                error = null,
+                source = settings.settings.value.source
+            )
+        }
+    }
+
     fun play(index: Int) {
         val songs = _uiState.value.results
         if (songs.isEmpty()) return

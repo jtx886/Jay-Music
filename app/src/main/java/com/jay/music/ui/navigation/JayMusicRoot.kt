@@ -77,6 +77,7 @@ import com.jay.music.ui.screens.library.LibraryViewModel
 import com.jay.music.ui.screens.player.PlayerScreen
 import com.jay.music.ui.screens.profile.ProfileScreen
 import com.jay.music.ui.screens.search.SearchScreen
+import com.jay.music.ui.screens.search.SearchViewModel
 import com.jay.music.ui.theme.BrandGreen
 import com.jay.music.ui.theme.BrandMint
 import com.jay.music.ui.theme.BrandPurple
@@ -172,8 +173,11 @@ private fun MainApp(
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     // 记录进入全屏播放器前的页面，退出播放器时回到原页面
     var playerReturnRoute by rememberSaveable { mutableStateOf(RootRoute.MAIN) }
+    // 搜索页 ViewModel 与根导航共享，离开搜索页时重置本次搜索状态
+    val searchViewModel: SearchViewModel = viewModel()
 
     BackHandler(enabled = route != RootRoute.MAIN) {
+        if (route == RootRoute.SEARCH) searchViewModel.resetSession()
         route = if (route == RootRoute.PLAYER) playerReturnRoute else RootRoute.MAIN
     }
 
@@ -204,11 +208,15 @@ private fun MainApp(
                     libraryViewModel = libraryViewModel,
                     sharedTransitionScope = sharedScope,
                     animatedVisibilityScope = visibilityScope,
-                    onBack = { route = RootRoute.MAIN },
+                    onBack = {
+                        searchViewModel.resetSession()
+                        route = RootRoute.MAIN
+                    },
                     onOpenPlayer = {
                         playerReturnRoute = RootRoute.SEARCH
                         route = RootRoute.PLAYER
-                    }
+                    },
+                    viewModel = searchViewModel
                 )
                 RootRoute.FAVORITES -> FavoritesScreen(
                     libraryViewModel = libraryViewModel,

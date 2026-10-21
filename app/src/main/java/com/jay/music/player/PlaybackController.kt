@@ -3,6 +3,7 @@ package com.jay.music.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -132,6 +133,21 @@ class PlaybackController(
                     }
                 }
                 delay(70)
+            }
+        }
+        // 真实听歌时长：按实际播放的墙钟时间累计，暂停/缓冲时不计入
+        scope.launch {
+            var lastTick = SystemClock.elapsedRealtime()
+            while (isActive) {
+                delay(1_000)
+                val now = SystemClock.elapsedRealtime()
+                val elapsed = (now - lastTick).coerceAtMost(2_000L)
+                lastTick = now
+                val player = controller
+                val actuallyPlaying = player != null &&
+                    player.isPlaying &&
+                    player.playbackState == Player.STATE_READY
+                if (actuallyPlaying) settings.addListenTime(elapsed)
             }
         }
     }

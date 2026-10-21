@@ -26,6 +26,18 @@ class SettingsStorage(context: Context) {
     private val _searchHistory = MutableStateFlow(loadSearchHistory())
     val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
 
+    // 累计真实听歌时长（毫秒）
+    private val _listenMs = MutableStateFlow(prefs.getLong(KEY_LISTEN_MS, 0L))
+    val listenMs: StateFlow<Long> = _listenMs.asStateFlow()
+
+    /** 累加实际播放时长，仅在实际出声播放时调用 */
+    fun addListenTime(deltaMs: Long) {
+        if (deltaMs <= 0L) return
+        val updated = _listenMs.value + deltaMs
+        _listenMs.value = updated
+        prefs.edit().putLong(KEY_LISTEN_MS, updated).apply()
+    }
+
     private fun load(): AppSettings = AppSettings(
         themeMode = ThemeMode.from(prefs.getString(KEY_THEME, null)),
         quality = AudioQuality.from(prefs.getString(KEY_QUALITY, null)),
@@ -83,6 +95,7 @@ class SettingsStorage(context: Context) {
         private const val KEY_PLAY_MODE = "play_mode"
         private const val KEY_SOURCE = "default_source"
         private const val KEY_SEARCH_HISTORY = "search_history"
+        private const val KEY_LISTEN_MS = "total_listen_ms"
         private const val SEPARATOR = "\u0001"
         private const val MAX_SEARCH_HISTORY = 12
     }

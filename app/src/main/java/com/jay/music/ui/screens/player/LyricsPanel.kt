@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -75,7 +76,6 @@ import com.jay.music.ui.components.TagChip
 import com.jay.music.ui.theme.BrandGreen
 import com.jay.music.ui.theme.BrandMint
 import com.jay.music.util.TimeFormat
-import kotlin.math.roundToInt
 
 /**
  * 歌词界面：
@@ -180,23 +180,17 @@ fun LyricsPanel(
                 }
             }
 
-            // 毛玻璃控制栏：进度可拖动 + 播放控制（全屏时隐藏，点击歌词区域可恢复）
-            AnimatedVisibility(
-                visible = !fullscreen,
-                enter = fadeIn(tween(240)),
-                exit = fadeOut(tween(160))
-            ) {
-                LyricsControlBar(
-                    positionMs = positionMs,
-                    durationMs = durationMs,
-                    isPlaying = isPlaying,
-                    isBuffering = isBuffering,
-                    onSeek = onSeek,
-                    onTogglePlay = onTogglePlay,
-                    onPrevious = onPrevious,
-                    onNext = onNext
-                )
-            }
+            // 毛玻璃控制栏：全屏模式下同样保留播放控制与进度调节
+            LyricsControlBar(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                isPlaying = isPlaying,
+                isBuffering = isBuffering,
+                onSeek = onSeek,
+                onTogglePlay = onTogglePlay,
+                onPrevious = onPrevious,
+                onNext = onNext
+            )
         }
 
         // 全屏时右上角悬浮退出按钮
@@ -382,6 +376,7 @@ private fun LyricsList(
                 val isCurrent = index == currentIndex
                 LyricLineItem(
                     line = line,
+                    nextLineStartMs = lyrics.lines.getOrNull(index + 1)?.startMs,
                     isCurrent = isCurrent,
                     progressMs = if (isCurrent) positionMs else 0L,
                     isYrc = lyrics.isYrc && line.words.isNotEmpty(),
@@ -393,10 +388,11 @@ private fun LyricsList(
     }
 }
 
-/** 单行歌词：当前行放大高亮，带毛玻璃微光背景，YRC 逐字变色 */
+/** 单行歌词：当前行放大高亮，逐字涂抹绿色，YRC 按字词真实时间、LRC 按行时长均匀分配 */
 @Composable
 private fun LyricLineItem(
     line: LyricLine,
+    nextLineStartMs: Long?,
     isCurrent: Boolean,
     progressMs: Long,
     isYrc: Boolean,
@@ -405,31 +401,48 @@ private fun LyricLineItem(
 ) {
     val scale by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0.94f,
-        animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f),
+        animationSpec = spring(dampingRatio = 1f, stiffness = 380f),
         label = "lyricScale"
     )
     val alpha by animateFloatAsState(
-        targetValue = if (isCurrent) 1f else 0.40f,
-        animationSpec = tween(360),
+        targetValue = if (isCurrent) 1f else 0.30f,
+        animationSpec = tween(420),
         label = "lyricAlpha"
     )
     val glow by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0f,
-        animationSpec = tween(420),
+        animationSpec = tween(480),
         label = "lyricGlow"
     )
     val highlight = MaterialTheme.colorScheme.primary
+    val dimColor = contentColor.copy(alpha = 0.38f)
 
-    val text = remember(line, isCurrent, isYrc, progressMs) {
-        if (isYrc && isCurrent) {
-            buildYrcAnnotatedString(
+    // 行演唱结束时间：优先使用下一行开始时间，其次行时长，最后按字数估算
+    val lineEndMs = remember(line, nextLineStartMs) {
+        when {
+            nextLineStartMs != null && nextLineStartMs > line.startMs -> nextLineStartMs
+            line.durationMs > 0L -> line.startMs + line.durationMs
+            else -> line.startMs + line.text.length * 220L
+        }
+    }
+
+    val text = remember(line, isCurrent, isYrc, progressMs, lineEndMs, highlight, dimColor) {
+        when {
+            !isCurrent -> AnnotatedString(line.text)
+            isYrc -> buildYrcAnnotatedString(
                 line = line,
                 progressMs = progressMs,
-                dimColor = contentColor.copy(alpha = 0.40f),
+                dimColor = dimColor,
                 highlightColor = highlight
             )
-        } else {
-            AnnotatedString(line.text)
+            else -> buildProgressiveAnnotatedString(
+                text = line.text,
+                startMs = line.startMs,
+                endMs = lineEndMs,
+                progressMs = progressMs,
+                dimColor = dimColor,
+                highlightColor = highlight
+            )
         }
     }
 
@@ -449,7 +462,9 @@ private fun LyricLineItem(
                     Brush.horizontalGradient(
                         listOf(
                             Color.Transparent,
-                            highlight.copy(alpha = 0.13f * glow),
+                            highlight.copy(alpha = 0.10f * glow),
+                            highlight.copy(alpha = 0.14f * glow),
+                            highlight.copy(alpha = 0.10f * glow),
                             Color.Transparent
                         )
                     )
@@ -492,8 +507,37 @@ private fun LyricLineItem(
 }
 
 /**
- * 构建 YRC 逐字歌词：已唱过的字使用高亮色，未唱到的字使用暗色，
- * 正在演唱的字按时间比例逐字填充，实现平滑变色。
+ * 普通 LRC 歌词的逐字涂抹：
+ * 由于 LRC 只有行时间，按行的演唱时长把每个字均匀铺开，
+ * 进度到达某个字时颜色从暗到高亮平滑过渡，形成连续的“涂抹”效果。
+ */
+private fun buildProgressiveAnnotatedString(
+    text: String,
+    startMs: Long,
+    endMs: Long,
+    progressMs: Long,
+    dimColor: Color,
+    highlightColor: Color
+): AnnotatedString {
+    if (text.isEmpty()) return AnnotatedString("")
+    val chars = text.toList()
+    val duration = (endMs - startMs).coerceAtLeast(1L)
+    val perChar = duration.toFloat() / chars.size
+
+    return buildAnnotatedString {
+        chars.forEachIndexed { index, char ->
+            val charStart = startMs + perChar * index
+            val fraction = ((progressMs - charStart) / perChar).coerceIn(0f, 1f)
+            withStyle(SpanStyle(color = lerp(dimColor, highlightColor, fraction))) {
+                append(char)
+            }
+        }
+    }
+}
+
+/**
+ * 构建 YRC 逐字歌词：已唱过的字高亮，未唱到的字为暗色，
+ * 正在演唱的字按字内时间比例平滑过渡颜色。
  */
 private fun buildYrcAnnotatedString(
     line: LyricLine,
@@ -502,25 +546,19 @@ private fun buildYrcAnnotatedString(
     highlightColor: Color
 ): AnnotatedString = buildAnnotatedString {
     line.words.forEach { word ->
-        val start = word.startMs
-        val end = word.startMs + word.durationMs
-        when {
-            progressMs >= end -> withStyle(SpanStyle(color = highlightColor)) {
-                append(word.text)
+        val chars = word.text.toList()
+        if (chars.isEmpty()) return@forEach
+        val perChar = if (word.durationMs > 0L) {
+            word.durationMs.toFloat() / chars.size
+        } else 0f
+        chars.forEachIndexed { index, char ->
+            val charStart = word.startMs + perChar * index
+            val fraction = when {
+                perChar <= 0f -> if (progressMs >= word.startMs) 1f else 0f
+                else -> ((progressMs - charStart) / perChar).coerceIn(0f, 1f)
             }
-            progressMs <= start -> withStyle(SpanStyle(color = dimColor)) {
-                append(word.text)
-            }
-            else -> {
-                val fraction = if (word.durationMs > 0) {
-                    ((progressMs - start).toFloat() / word.durationMs).coerceIn(0f, 1f)
-                } else 1f
-                val sungCount = (word.text.length * fraction).roundToInt()
-                    .coerceIn(0, word.text.length)
-                word.text.forEachIndexed { index, char ->
-                    val color = if (index < sungCount) highlightColor else dimColor
-                    withStyle(SpanStyle(color = color)) { append(char) }
-                }
+            withStyle(SpanStyle(color = lerp(dimColor, highlightColor, fraction))) {
+                append(char)
             }
         }
     }

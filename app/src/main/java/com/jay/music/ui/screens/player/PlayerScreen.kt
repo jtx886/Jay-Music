@@ -85,6 +85,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -96,6 +97,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.jay.music.core.ServiceLocator
 import com.jay.music.data.model.AudioQuality
+import com.jay.music.data.model.Lyrics
 import com.jay.music.data.model.PlayMode
 import com.jay.music.ui.components.CoverPlaceholder
 import com.jay.music.ui.components.FavoriteButton
@@ -269,6 +271,7 @@ fun PlayerScreen(
                             quality = state.quality,
                             positionMs = position,
                             durationMs = state.durationMs,
+                            lyrics = lyricsState.lyrics,
                             favorite = favorite,
                             dominantColor = dominant,
                             contentColor = contentColor,
@@ -423,6 +426,7 @@ private fun AlbumPlayerContent(
     quality: AudioQuality,
     positionMs: Long,
     durationMs: Long,
+    lyrics: Lyrics,
     favorite: Boolean,
     dominantColor: Color,
     contentColor: Color,
@@ -592,7 +596,17 @@ private fun AlbumPlayerContent(
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(12.dp))
+
+            // 两行歌词预览：点击进入歌词页
+            PlayerLyricPreview(
+                lyrics = lyrics,
+                positionMs = positionMs,
+                contentColor = contentColor,
+                onClick = onOpenLyrics
+            )
+
+            Spacer(Modifier.height(12.dp))
 
             // 可拖拽进度条
             var dragFraction by remember { mutableStateOf<Float?>(null) }
@@ -732,6 +746,61 @@ private fun AlbumPlayerContent(
             }
 
             Spacer(Modifier.weight(0.22f))
+        }
+    }
+}
+
+/** 播放器页两行歌词预览，点击进入歌词页 */
+@Composable
+private fun PlayerLyricPreview(
+    lyrics: Lyrics,
+    positionMs: Long,
+    contentColor: Color,
+    onClick: () -> Unit
+) {
+    if (lyrics.isEmpty) return
+    val currentIndex = lyrics.indexAt(positionMs)
+
+    AnimatedContent(
+        targetState = currentIndex,
+        transitionSpec = { fadeIn(tween(360)) togetherWith fadeOut(tween(220)) },
+        label = "playerLyricPreview",
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) { index ->
+        val current = lyrics.lines.getOrNull(index)
+        val upcoming = lyrics.lines.getOrNull(if (index < 0) 0 else index + 1)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = current?.text ?: upcoming?.text.orEmpty(),
+                color = if (current != null) contentColor else contentColor.copy(alpha = 0.52f),
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                fontWeight = if (current != null) FontWeight.Bold else FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (current != null && upcoming != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = upcoming.text,
+                    color = contentColor.copy(alpha = 0.42f),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }
