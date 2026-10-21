@@ -9,10 +9,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -171,55 +173,67 @@ fun PlayerScreen(
                 )
         )
 
-        AnimatedContent(
-            targetState = showLyrics,
-            transitionSpec = {
-                if (targetState) {
-                    (fadeIn(tween(340)) + slideInVertically(tween(420)) { it / 8 }) togetherWith
-                        fadeOut(tween(220))
-                } else {
-                    fadeIn(tween(300)) togetherWith
-                        (fadeOut(tween(220)) + slideOutVertically(tween(340)) { -it / 8 })
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 顶部固定：收起按钮 + 播放器/歌词切换 + 收藏
+            PlayerTopBar(
+                showLyrics = showLyrics,
+                contentColor = contentColor,
+                favorite = favorite,
+                onBack = onBack,
+                onToggleFavorite = { libraryViewModel.toggleFavorite(song) },
+                onSelectMode = { showLyrics = it }
+            )
+
+            Box(modifier = Modifier.weight(1f)) {
+                AnimatedContent(
+                    targetState = showLyrics,
+                    transitionSpec = {
+                        (fadeIn(tween(320)) + scaleIn(tween(340), initialScale = 0.96f)) togetherWith
+                            (fadeOut(tween(200)) + scaleOut(tween(220), targetScale = 1.02f))
+                    },
+                    label = "playerMode",
+                    modifier = Modifier.fillMaxSize()
+                ) { lyricsMode ->
+                    if (lyricsMode) {
+                        LyricsPanel(
+                            song = song,
+                            lyricsState = lyricsState,
+                            positionMs = position,
+                            durationMs = state.durationMs,
+                            isPlaying = state.isPlaying,
+                            isBuffering = state.isBuffering || state.isPreparing,
+                            onRetry = { viewModel.retry(song) },
+                            onSeek = { controller.seekTo(it) },
+                            onTogglePlay = { controller.togglePlayPause() },
+                            onPrevious = { controller.previous() },
+                            onNext = { controller.next() }
+                        )
+                    } else {
+                        AlbumPlayerContent(
+                            sharedTransitionScope = sharedTransitionScope,
+                            animatedVisibilityScope = animatedVisibilityScope,
+                            song = song,
+                            isPlaying = state.isPlaying,
+                            isBuffering = state.isBuffering || state.isPreparing,
+                            playMode = state.playMode,
+                            quality = state.quality,
+                            positionMs = position,
+                            durationMs = state.durationMs,
+                            favorite = favorite,
+                            dominantColor = dominant,
+                            contentColor = contentColor,
+                            dark = dark,
+                            onTogglePlay = { controller.togglePlayPause() },
+                            onPrevious = { controller.previous() },
+                            onNext = { controller.next() },
+                            onSeek = { controller.seekTo(it) },
+                            onCyclePlayMode = { controller.cyclePlayMode() },
+                            onOpenQuality = { showQualitySheet = true },
+                            onOpenLyrics = { showLyrics = true },
+                            onToggleFavorite = { libraryViewModel.toggleFavorite(song) }
+                        )
+                    }
                 }
-            },
-            label = "playerMode",
-            modifier = Modifier.fillMaxSize()
-        ) { lyricsMode ->
-            if (lyricsMode) {
-                LyricsPanel(
-                    song = song,
-                    lyricsState = lyricsState,
-                    positionMs = position,
-                    onBackToAlbum = { showLyrics = false },
-                    onClose = onBack,
-                    onRetry = { viewModel.retry(song) },
-                    onSeek = { controller.seekTo(it) }
-                )
-            } else {
-                AlbumPlayerContent(
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope,
-                    song = song,
-                    isPlaying = state.isPlaying,
-                    isBuffering = state.isBuffering || state.isPreparing,
-                    playMode = state.playMode,
-                    quality = state.quality,
-                    positionMs = position,
-                    durationMs = state.durationMs,
-                    favorite = favorite,
-                    dominantColor = dominant,
-                    contentColor = contentColor,
-                    dark = dark,
-                    onBack = onBack,
-                    onTogglePlay = { controller.togglePlayPause() },
-                    onPrevious = { controller.previous() },
-                    onNext = { controller.next() },
-                    onSeek = { controller.seekTo(it) },
-                    onCyclePlayMode = { controller.cyclePlayMode() },
-                    onOpenQuality = { showQualitySheet = true },
-                    onOpenLyrics = { showLyrics = true },
-                    onToggleFavorite = { libraryViewModel.toggleFavorite(song) }
-                )
             }
         }
     }
@@ -232,6 +246,116 @@ fun PlayerScreen(
                 showQualitySheet = false
             },
             onDismiss = { showQualitySheet = false }
+        )
+    }
+}
+
+/**
+ * 播放器顶部栏：收起、播放器/歌词切换、收藏。
+ * 两种模式共用，切换时仅内容区做柔和的缩放淡入淡出。
+ */
+@Composable
+private fun PlayerTopBar(
+    showLyrics: Boolean,
+    contentColor: Color,
+    favorite: Boolean,
+    onBack: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onSelectMode: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RoundedIconButton(
+            icon = Icons.Rounded.KeyboardArrowDown,
+            contentDescription = "收起播放器",
+            onClick = onBack,
+            tint = contentColor,
+            container = contentColor.copy(alpha = 0.10f)
+        )
+        Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(contentColor.copy(alpha = 0.10f))
+                .border(
+                    1.dp,
+                    contentColor.copy(alpha = 0.10f),
+                    RoundedCornerShape(50)
+                )
+                .padding(3.dp)
+        ) {
+            PlayerModeTab(
+                label = "播放器",
+                icon = Icons.Rounded.MusicNote,
+                selected = !showLyrics,
+                contentColor = contentColor,
+                onClick = { onSelectMode(false) }
+            )
+            PlayerModeTab(
+                label = "歌词",
+                icon = Icons.Rounded.Subtitles,
+                selected = showLyrics,
+                contentColor = contentColor,
+                onClick = { onSelectMode(true) }
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        FavoriteButton(isFavorite = favorite, onClick = onToggleFavorite)
+    }
+}
+
+@Composable
+private fun PlayerModeTab(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    contentColor: Color,
+    onClick: () -> Unit
+) {
+    val background by animateColorAsState(
+        targetValue = if (selected) contentColor.copy(alpha = 0.18f) else Color.Transparent,
+        animationSpec = tween(260),
+        label = "modeTabBg"
+    )
+    val foreground by animateColorAsState(
+        targetValue = contentColor.copy(alpha = if (selected) 1f else 0.55f),
+        animationSpec = tween(260),
+        label = "modeTabFg"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1f else 0.96f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+        label = "modeTabScale"
+    )
+    Row(
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(50))
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = foreground,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = foreground
         )
     }
 }
@@ -253,7 +377,6 @@ private fun AlbumPlayerContent(
     dominantColor: Color,
     contentColor: Color,
     dark: Boolean,
-    onBack: () -> Unit,
     onTogglePlay: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -266,7 +389,6 @@ private fun AlbumPlayerContent(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
             .navigationBarsPadding()
     ) {
         val artSize = minOf(maxWidth - 72.dp, maxHeight * 0.42f, 340.dp)
@@ -292,34 +414,17 @@ private fun AlbumPlayerContent(
                 .fillMaxSize()
                 .padding(horizontal = 24.dp)
         ) {
-            // 顶部栏
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+            // 小标签：正在播放 + 音源
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                contentAlignment = Alignment.Center
             ) {
-                RoundedIconButton(
-                    icon = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "收起播放器",
-                    onClick = onBack,
-                    tint = contentColor,
-                    container = contentColor.copy(alpha = 0.10f)
+                TagChip(
+                    text = "正在播放 · ${song.source.label}",
+                    color = if (dark) BrandGreen else MaterialTheme.colorScheme.primary
                 )
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "正在播放",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = contentColor.copy(alpha = 0.62f)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    TagChip(
-                        text = song.source.label,
-                        color = if (dark) BrandGreen else MaterialTheme.colorScheme.primary
-                    )
-                }
-                FavoriteButton(isFavorite = favorite, onClick = onToggleFavorite)
             }
 
             Spacer(Modifier.weight(0.5f))
@@ -342,6 +447,7 @@ private fun AlbumPlayerContent(
                             .background(
                                 Brush.linearGradient(listOf(dominantColor, Color.Black))
                             )
+                            .clickable(onClick = onOpenLyrics)
                     ) {
                         Box(
                             modifier = Modifier

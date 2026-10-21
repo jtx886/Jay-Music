@@ -7,8 +7,6 @@ import com.jay.music.data.model.MusicSource
 import com.jay.music.data.model.Song
 import com.jay.music.data.remote.MusicRemoteDataSource
 import com.jay.music.player.LyricsParser
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 
 /**
  * 音乐仓库：搜索、榜单、音频直链、封面、歌词。
@@ -19,24 +17,31 @@ class MusicRepository(
     private val settings: SettingsStorage
 ) {
 
-    suspend fun hotChart(listName: String = "热歌榜"): Result<List<Song>> = runCatching {
-        remote.neteaseChart(listName).ifEmpty {
-            throw IllegalStateException("榜单数据为空")
+    suspend fun hotChart(source: MusicSource, listName: String = "热歌榜"): Result<List<Song>> =
+        runCatching {
+            val songs = when (source) {
+                MusicSource.NETEASE -> remote.neteaseChart(listName)
+                MusicSource.SODA -> remote.sodaChart()
+            }
+            if (songs.isEmpty()) throw IllegalStateException("榜单数据为空")
+            songs
         }
+
+    /** 搜索：只请求当前选中的音源 */
+    suspend fun search(query: String, source: MusicSource): Result<List<Song>> = runCatching {
+        val songs = when (source) {
+            MusicSource.NETEASE -> remote.searchNetease(query)
+            MusicSource.SODA -> remote.searchSoda(query)
+        }
+        songs.distinctBy { "${it.name.lowercase()}|${it.artist.lowercase()}" }
     }
 
-    /** 搜索：汽水音乐 + 网易云双音源，合并后按歌名/歌手去重 */
-    suspend fun search(query: String): Result<List<Song>> = runCatching {
-        coroutineScope {
-            val soda = async { runCatching { remote.searchSoda(query) }.getOrDefault(emptyList()) }
-            val netease = async { runCatching { remote.searchNetease(query) }.getOrDefault(emptyList()) }
-            (soda.await() + netease.await())
-                .distinctBy { "${it.name.lowercase()}|${it.artist.lowercase()}" }
+    suspend fun randomSong(source: MusicSource): Result<Song> = runCatching {
+        val song = when (source) {
+            MusicSource.NETEASE -> remote.randomNeteaseSong()
+            MusicSource.SODA -> remote.sodaChart().randomOrNull()
         }
-    }
-
-    suspend fun randomSong(): Result<Song> = runCatching {
-        remote.randomNeteaseSong() ?: throw IllegalStateException("暂无推荐歌曲")
+        song ?: throw IllegalStateException("暂无推荐歌曲")
     }
 
     /** 获取可播放的音频直链（主接口失败自动降级） */

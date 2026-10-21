@@ -23,6 +23,9 @@ class SettingsStorage(context: Context) {
     private val _settings = MutableStateFlow(load())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    private val _searchHistory = MutableStateFlow(loadSearchHistory())
+    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
     private fun load(): AppSettings = AppSettings(
         themeMode = ThemeMode.from(prefs.getString(KEY_THEME, null)),
         quality = AudioQuality.from(prefs.getString(KEY_QUALITY, null)),
@@ -50,11 +53,37 @@ class SettingsStorage(context: Context) {
         _settings.update { it.copy(source = source) }
     }
 
+    // ------------------------- 搜索历史 -------------------------
+
+    fun addSearchHistory(query: String) {
+        val keyword = query.trim()
+        if (keyword.isBlank()) return
+        val updated = (listOf(keyword) + _searchHistory.value.filterNot { it.equals(keyword, true) })
+            .take(MAX_SEARCH_HISTORY)
+        prefs.edit().putString(KEY_SEARCH_HISTORY, updated.joinToString(SEPARATOR)).apply()
+        _searchHistory.value = updated
+    }
+
+    fun clearSearchHistory() {
+        prefs.edit().remove(KEY_SEARCH_HISTORY).apply()
+        _searchHistory.value = emptyList()
+    }
+
+    private fun loadSearchHistory(): List<String> = prefs.getString(KEY_SEARCH_HISTORY, null)
+        ?.split(SEPARATOR)
+        ?.map { it.trim() }
+        ?.filter { it.isNotBlank() }
+        ?.take(MAX_SEARCH_HISTORY)
+        .orEmpty()
+
     companion object {
         private const val PREFS_NAME = "jay_music_settings"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_QUALITY = "default_quality"
         private const val KEY_PLAY_MODE = "play_mode"
         private const val KEY_SOURCE = "default_source"
+        private const val KEY_SEARCH_HISTORY = "search_history"
+        private const val SEPARATOR = "\u0001"
+        private const val MAX_SEARCH_HISTORY = 12
     }
 }

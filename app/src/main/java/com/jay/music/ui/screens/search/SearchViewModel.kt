@@ -3,6 +3,7 @@ package com.jay.music.ui.screens.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jay.music.core.ServiceLocator
+import com.jay.music.data.model.MusicSource
 import com.jay.music.data.model.Song
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -20,22 +21,38 @@ data class SearchUiState(
     val results: List<Song> = emptyList(),
     val isSearching: Boolean = false,
     val hasSearched: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val source: MusicSource = MusicSource.NETEASE,
+    val history: List<String> = emptyList()
 )
 
-/** 搜索页：汽水音乐 + 网易云双音源搜索 */
+/** 搜索页：按当前音源搜索 + 本地搜索历史 */
 class SearchViewModel : ViewModel() {
 
     private val musicRepository = ServiceLocator.musicRepository
     private val playbackController = ServiceLocator.playbackController
+    private val settings = ServiceLocator.settingsStorage
 
-    private val _uiState = MutableStateFlow(SearchUiState())
+    private val _uiState = MutableStateFlow(
+        SearchUiState(
+            source = settings.settings.value.source,
+            history = settings.searchHistory.value
+        )
+    )
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     private var searchJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            settings.searchHistory.collect { history ->
+                _uiState.update { it.copy(history = history) }
+            }
+        }
+    }
 
     fun onQueryChange(query: String) {
         _uiState.update { it.copy(query = query) }
@@ -55,14 +72,36 @@ class SearchViewModel : ViewModel() {
 
     fun searchNow() {
         searchJob?.cancel()
-        val query = _uiState.value.query
+        val query = _uiState.value.query.trim()
         if (query.isBlank()) return
+        settings.addSearchHistory(query)
         searchJob = viewModelScope.launch { performSearch(query) }
+    }
+
+    /** 切换音源：立即用新音源重新搜索（首页榜单也会跟随刷新） */
+    fun selectSource(source: MusicSource) {
+        if (source == _uiState.value.source) return
+        settings.setSource(source)
+        searchJob?.cancel()
+        _uiState.update {
+            it.copy(source = source, results = emptyList(), hasSearched = false, error = null)
+        }
+        val query = _uiState.value.query.trim()
+        if (query.isNotBlank()) {
+            settings.addSearchHistory(query)
+            searchJob = viewModelScope.launch { performSearch(query) }
+        }
+    }
+
+    fun clearHistory() {
+        settings.clearSearchHistory()
     }
 
     fun play(index: Int) {
         val songs = _uiState.value.results
         if (songs.isEmpty()) return
+        val query = _uiState.value.query.trim()
+        if (query.isNotBlank()) settings.addSearchHistory(query)
         playbackController.play(songs, index)
     }
 
@@ -75,7 +114,7 @@ class SearchViewModel : ViewModel() {
         _uiState.update {
             it.copy(isSearching = true, hasSearched = true, error = null)
         }
-        musicRepository.search(query.trim())
+        musicRepository.search(query.trim(), _uiState.value.source)
             .onSuccess { songs ->
                 _uiState.update {
                     it.copy(results = songs, isSearching = false, error = null)

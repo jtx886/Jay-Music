@@ -168,20 +168,39 @@ class MusicRemoteDataSource(
                     val entity = item.takeIf { it.isJsonObject }?.asJsonObject
                         ?.getAsJsonObject("entity") ?: return@mapNotNull null
                     val track = entity.getAsJsonObject("track") ?: return@mapNotNull null
-                    val id = firstString(track, "id") ?: return@mapNotNull null
-                    val name = firstString(track, "name") ?: return@mapNotNull null
-                    Song(
-                        id = id,
-                        name = name,
-                        artist = sodaArtists(track) ?: "未知歌手",
-                        album = track.getAsJsonObject("album")?.let { firstString(it, "name") } ?: "",
-                        coverUrl = sodaCoverUrl(track.getAsJsonObject("album")?.get("url_cover")),
-                        durationMs = firstLong(track, "duration") ?: 0L,
-                        source = MusicSource.SODA
-                    )
+                    parseSodaSong(track)
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    /** 汽水音乐热歌榜（公开榜单接口，无需登录） */
+    suspend fun sodaChart(): List<Song> = withContext(Dispatchers.IO) {
+        val text = getText(SODA_CHART_URL, SODA_HEADERS) ?: return@withContext emptyList()
+        runCatching {
+            val root = JsonParser.parseString(text).asJsonObject
+            val chart = root.getAsJsonObject("chart") ?: return@runCatching emptyList()
+            val ranks = chart.getAsJsonArray("track_ranks") ?: return@runCatching emptyList()
+            ranks.mapNotNull { item ->
+                val track = item.takeIf { it.isJsonObject }?.asJsonObject
+                    ?.getAsJsonObject("track") ?: return@mapNotNull null
+                parseSodaSong(track)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseSodaSong(track: JsonObject): Song? {
+        val id = firstString(track, "id") ?: return null
+        val name = firstString(track, "name") ?: return null
+        return Song(
+            id = id,
+            name = name,
+            artist = sodaArtists(track) ?: "未知歌手",
+            album = track.getAsJsonObject("album")?.let { firstString(it, "name") } ?: "",
+            coverUrl = sodaCoverUrl(track.getAsJsonObject("album")?.get("url_cover")),
+            durationMs = firstLong(track, "duration") ?: 0L,
+            source = MusicSource.SODA
+        )
     }
 
     /** 汽水音乐音频直链（H5 SEO 接口 -> 播放信息） */
@@ -433,6 +452,8 @@ class MusicRemoteDataSource(
 
         private const val SODA_SEARCH_URL = "https://api.qishui.com/luna/search/track"
         private const val SODA_SEO_URL = "https://beta-luna.douyin.com/luna/h5/seo_track"
+        private const val SODA_CHART_URL =
+            "https://api5-lf.qishui.com/luna/charts/7036274230471712007?charge=0"
 
         private val SODA_HEADERS = mapOf(
             "User-Agent" to

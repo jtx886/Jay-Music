@@ -11,6 +11,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.jay.music.R
 import com.jay.music.data.local.SettingsStorage
 import com.jay.music.data.model.AudioQuality
 import com.jay.music.data.model.PlayMode
@@ -105,6 +106,7 @@ class PlaybackController(
             recordHistory(song)
             ensureResolved(index, song)
             prefetch(index + 1)
+            prefetch(index + 2)
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -196,6 +198,7 @@ class PlaybackController(
             errorKey = null
             _state.update { it.copy(isPreparing = false) }
             prefetch(index + 1)
+            prefetch(index + 2)
         }
     }
 
@@ -369,11 +372,15 @@ class PlaybackController(
             .build()
     }
 
-    /** 队列中未解析歌曲使用的临时直链 */
+    /**
+     * 队列中未解析歌曲使用的临时直链。
+     * 汽水直链必须动态解析，未解析时先使用内置静音占位音频，
+     * 避免空 URI 让播放器进入 IDLE 导致通知栏被移除。
+     */
     private fun fallbackUrl(song: Song): String = when (song.source) {
         com.jay.music.data.model.MusicSource.NETEASE ->
             "https://music.163.com/song/media/outer/url?id=${song.id}"
-        // 汽水直链需要动态解析，未解析时先置空，播放到该曲时会触发解析
-        com.jay.music.data.model.MusicSource.SODA -> ""
+        com.jay.music.data.model.MusicSource.SODA ->
+            "android.resource://${context.packageName}/${R.raw.silent_placeholder}"
     }
 }

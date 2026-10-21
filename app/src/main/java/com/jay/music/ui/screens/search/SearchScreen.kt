@@ -5,13 +5,24 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +44,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.Icon
@@ -52,6 +64,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jay.music.core.ServiceLocator
+import com.jay.music.data.model.MusicSource
 import com.jay.music.ui.components.EmptyState
 import com.jay.music.ui.components.MiniPlayerHost
 import com.jay.music.ui.components.RevealItem
@@ -182,6 +196,13 @@ fun SearchScreen(
                 )
             }
 
+            // 音源切换（网易云 / 汽水），切换后首页榜单同步刷新
+            SourceSwitcher(
+                current = uiState.source,
+                onSelect = viewModel::selectSource,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+            )
+
             // 内容区
             Box(modifier = Modifier.weight(1f)) {
                 when {
@@ -201,7 +222,7 @@ fun SearchScreen(
                     uiState.results.isNotEmpty() -> {
                         Column(Modifier.fillMaxSize()) {
                             Text(
-                                text = "找到 ${uiState.results.size} 首相关歌曲",
+                                text = "${uiState.source.label} · 找到 ${uiState.results.size} 首相关歌曲",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
@@ -231,6 +252,12 @@ fun SearchScreen(
                         }
                     }
                     else -> SearchDiscovery(
+                        history = uiState.history,
+                        onClearHistory = viewModel::clearHistory,
+                        onHistoryClick = { text ->
+                            keyboard?.hide()
+                            viewModel.useSuggestion(text)
+                        },
                         onSuggestionClick = { text ->
                             keyboard?.hide()
                             viewModel.useSuggestion(text)
@@ -252,16 +279,94 @@ fun SearchScreen(
     }
 }
 
-/** 未搜索时的探索页 */
+/** 音源切换胶囊：网易云 / 汽水 */
 @Composable
-private fun SearchDiscovery(onSuggestionClick: (String) -> Unit) {
+private fun SourceSwitcher(
+    current: MusicSource,
+    onSelect: (MusicSource) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "音源",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.width(10.dp))
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                .padding(3.dp)
+        ) {
+            MusicSource.entries.forEach { source ->
+                val selected = source == current
+                val background by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.primary
+                    else Color.Transparent,
+                    animationSpec = tween(260),
+                    label = "sourceBg"
+                )
+                val textColor by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(260),
+                    label = "sourceFg"
+                )
+                val scale by animateFloatAsState(
+                    targetValue = if (selected) 1f else 0.95f,
+                    animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+                    label = "sourceScale"
+                )
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                        .clip(RoundedCornerShape(50))
+                        .background(background)
+                        .clickable { onSelect(source) }
+                        .padding(horizontal = 18.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = source.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = textColor
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = "搜索与首页同步",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+        )
+    }
+}
+
+/** 未搜索时的探索页：搜索历史 + 热门搜索 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SearchDiscovery(
+    history: List<String>,
+    onClearHistory: () -> Unit,
+    onHistoryClick: (String) -> Unit,
+    onSuggestionClick: (String) -> Unit
+) {
     val suggestions = listOf("周杰伦", "告白气球", "林俊杰", "夜曲", "晴天", "起风了")
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
     ) {
-        Spacer(Modifier.height(30.dp))
+        Spacer(Modifier.height(24.dp))
         Text(
             text = "搜索你的音乐宇宙",
             style = MaterialTheme.typography.headlineMedium,
@@ -273,6 +378,69 @@ private fun SearchDiscovery(onSuggestionClick: (String) -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        if (history.isNotEmpty()) {
+            Spacer(Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "搜索历史",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "清空",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onClearHistory)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                history.forEach { keyword ->
+                    val dark = isDarkTheme()
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (dark) Color.White.copy(alpha = 0.07f)
+                                else Color.White.copy(alpha = 0.86f)
+                            )
+                            .border(
+                                1.dp,
+                                if (dark) Color.White.copy(alpha = 0.10f) else Color.White,
+                                RoundedCornerShape(50)
+                            )
+                            .clickable { onHistoryClick(keyword) }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = keyword,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(26.dp))
         Text(
             text = "热门搜索",
@@ -296,13 +464,18 @@ private fun SearchDiscovery(onSuggestionClick: (String) -> Unit) {
                 }
             }
         }
-        Spacer(Modifier.height(40.dp))
-        EmptyState(
-            title = "开始寻找你的下一首心动",
-            subtitle = "输入关键词，让 Jay Music 为你找到它",
-            icon = Icons.Rounded.Search,
-            modifier = Modifier.padding(top = 10.dp)
-        )
+
+        if (history.isEmpty()) {
+            Spacer(Modifier.height(30.dp))
+            EmptyState(
+                title = "开始寻找你的下一首心动",
+                subtitle = "输入关键词，让 Jay Music 为你找到它",
+                icon = Icons.Rounded.Search,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+        } else {
+            Spacer(Modifier.height(60.dp))
+        }
     }
 }
 
