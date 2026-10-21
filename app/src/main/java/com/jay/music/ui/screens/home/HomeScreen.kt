@@ -219,7 +219,7 @@ fun HomeScreen(
                         item(key = "chart_title") {
                             SectionHeader(
                                 title = "热歌榜",
-                                subtitle = "网易云官方榜单 · 每日更新",
+                                subtitle = "Jay Music",
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
                             ) {
                                 RoundedIconButton(

@@ -46,9 +46,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,6 +84,7 @@ import com.jay.music.ui.components.isDarkTheme
 import com.jay.music.ui.theme.BrandGreen
 import com.jay.music.ui.theme.BrandMint
 import com.jay.music.util.TimeFormat
+import kotlin.math.abs
 
 /**
  * 歌词界面：
@@ -179,6 +183,7 @@ fun LyricsPanel(
                     else -> LyricsList(
                         lyrics = lyrics,
                         positionMs = positionMs,
+                        isPlaying = isPlaying,
                         contentColor = contentColor,
                         onSeek = onSeek
                     )
@@ -395,15 +400,61 @@ private fun LyricsPlayButton(
     }
 }
 
+/**
+ * 渲染用播放进度：
+ * 播放器回报的真实进度会有采样间隔，直接用它渲染会让逐字涂抹一顿一顿。
+ * 这里以真实进度为锚点，按屏幕帧率在两次回报之间线性推进，
+ * 遇到 seek / 切歌时立即对齐，保证歌词严格踩着音乐节奏走。
+ */
+@Composable
+private fun rememberSmoothPosition(positionMs: Long, isPlaying: Boolean): Long {
+    val latestPosition by rememberUpdatedState(positionMs)
+    val latestPlaying by rememberUpdatedState(isPlaying)
+    val rendered = remember { mutableLongStateOf(positionMs) }
+
+    LaunchedEffect(Unit) {
+        var anchor = latestPosition
+        var lastFrameNs = 0L
+        while (true) {
+            withFrameNanos { frameNs ->
+                val deltaMs = if (lastFrameNs == 0L) 0L
+                else (frameNs - lastFrameNs) / 1_000_000L
+                lastFrameNs = frameNs
+
+                val target = latestPosition
+                if (!latestPlaying) {
+                    // 暂停 / 缓冲：直接使用真实进度
+                    anchor = target
+                    rendered.longValue = target
+                } else {
+                    if (abs(target - anchor) > 400L) {
+                        // seek 或切歌，立即对齐，避免慢慢爬过去
+                        anchor = target
+                    } else {
+                        anchor += deltaMs.coerceIn(0L, 48L)
+                    }
+                    // 只允许小幅超前（抵掉采样延迟），不允许明显漂移
+                    anchor = anchor.coerceIn(target - 40L, target + 60L)
+                    rendered.longValue = anchor.coerceAtLeast(0L)
+                }
+            }
+        }
+    }
+    return rendered.longValue
+}
+
 /** 滚动歌词列表：当前行自动居中 */
 @Composable
 private fun LyricsList(
     lyrics: Lyrics,
     positionMs: Long,
+    isPlaying: Boolean,
     contentColor: Color,
     onSeek: (Long) -> Unit
 ) {
-    val currentIndex = lyrics.indexAt(positionMs)
+    // 按屏幕帧率推进的渲染进度，保证逐字涂抹紧跟音乐节奏
+    val renderedPosition = rememberSmoothPosition(positionMs, isPlaying)
+    val currentIndex = lyrics.indexAt(renderedPosition)
     val listState = rememberLazyListState()
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -435,7 +486,7 @@ private fun LyricsList(
                     line = line,
                     nextLineStartMs = lyrics.lines.getOrNull(index + 1)?.startMs,
                     isCurrent = isCurrent,
-                    progressMs = if (isCurrent) positionMs else 0L,
+                    progressMs = if (isCurrent) renderedPosition else 0L,
                     isYrc = lyrics.isYrc && line.words.isNotEmpty(),
                     contentColor = contentColor,
                     onClick = { onSeek(line.startMs) }

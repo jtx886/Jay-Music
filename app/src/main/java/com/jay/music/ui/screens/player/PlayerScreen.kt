@@ -468,7 +468,7 @@ private fun AlbumPlayerContent(
                 .fillMaxSize()
                 .padding(horizontal = 24.dp)
         ) {
-            // 小标签：正在播放 + 音源
+            // 小标签：品牌标识
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -476,7 +476,7 @@ private fun AlbumPlayerContent(
                 contentAlignment = Alignment.Center
             ) {
                 TagChip(
-                    text = "正在播放 · Jay Music",
+                    text = "Jay Music",
                     color = if (dark) BrandGreen else MaterialTheme.colorScheme.primary
                 )
             }
