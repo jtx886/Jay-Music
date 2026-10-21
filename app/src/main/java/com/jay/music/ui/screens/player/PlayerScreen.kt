@@ -1,7 +1,11 @@
 package com.jay.music.ui.screens.player
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -61,6 +65,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,10 +82,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -127,6 +137,7 @@ fun PlayerScreen(
 
     val song = state.currentSong
     var showLyrics by rememberSaveable { mutableStateOf(false) }
+    var lyricsFullscreen by rememberSaveable { mutableStateOf(false) }
     var showQualitySheet by remember { mutableStateOf(false) }
 
     // 当前歌曲变化时加载歌词；无歌曲则直接关闭播放器
@@ -141,8 +152,36 @@ fun PlayerScreen(
     val dominant = rememberDominantColor(song.coverUrl.takeIf { it.isNotBlank() }, BrandPurple)
     val backgroundColor = MaterialTheme.colorScheme.background
 
+    // 离开歌词页时自动退出全屏
+    LaunchedEffect(showLyrics) {
+        if (!showLyrics) lyricsFullscreen = false
+    }
+
+    // 全屏歌词时隐藏系统状态栏/导航栏，退出时恢复
+    val view = LocalView.current
+    val context = LocalContext.current
+    DisposableEffect(showLyrics, lyricsFullscreen) {
+        val window = context.findActivity()?.window
+        val insetsController = window?.let { WindowCompat.getInsetsController(it, view) }
+        val immersive = showLyrics && lyricsFullscreen
+        if (immersive) {
+            insetsController?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose {
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     BackHandler {
-        if (showLyrics) showLyrics = false else onBack()
+        when {
+            lyricsFullscreen -> lyricsFullscreen = false
+            showLyrics -> showLyrics = false
+            else -> onBack()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -174,15 +213,24 @@ fun PlayerScreen(
         )
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // 顶部固定：收起按钮 + 播放器/歌词切换 + 收藏
-            PlayerTopBar(
-                showLyrics = showLyrics,
-                contentColor = contentColor,
-                favorite = favorite,
-                onBack = onBack,
-                onToggleFavorite = { libraryViewModel.toggleFavorite(song) },
-                onSelectMode = { showLyrics = it }
-            )
+            // 顶部固定：收起按钮 + 播放器/歌词切换 + 收藏（全屏歌词时隐藏）
+            AnimatedVisibility(
+                visible = !lyricsFullscreen,
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(160))
+            ) {
+                PlayerTopBar(
+                    showLyrics = showLyrics,
+                    contentColor = contentColor,
+                    favorite = favorite,
+                    onBack = onBack,
+                    onToggleFavorite = { libraryViewModel.toggleFavorite(song) },
+                    onSelectMode = {
+                        showLyrics = it
+                        if (!it) lyricsFullscreen = false
+                    }
+                )
+            }
 
             Box(modifier = Modifier.weight(1f)) {
                 AnimatedContent(
@@ -206,7 +254,9 @@ fun PlayerScreen(
                             onSeek = { controller.seekTo(it) },
                             onTogglePlay = { controller.togglePlayPause() },
                             onPrevious = { controller.previous() },
-                            onNext = { controller.next() }
+                            onNext = { controller.next() },
+                            fullscreen = lyricsFullscreen,
+                            onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen }
                         )
                     } else {
                         AlbumPlayerContent(
@@ -834,4 +884,14 @@ private fun qualityDescription(quality: AudioQuality): String = when (quality) {
     AudioQuality.EXHIGH -> "320kbps · 高品质"
     AudioQuality.LOSSLESS -> "FLAC · 无损音质"
     AudioQuality.HIRES -> "Hi-Res · 母带级"
+}
+
+/** 从 Compose 的 Context 包装层中找到宿主 Activity，用于控制系统栏显隐 */
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }

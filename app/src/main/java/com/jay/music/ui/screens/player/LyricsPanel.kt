@@ -1,8 +1,11 @@
 package com.jay.music.ui.screens.player
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +28,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
@@ -91,82 +96,128 @@ fun LyricsPanel(
     onSeek: (Long) -> Unit,
     onTogglePlay: () -> Unit,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    fullscreen: Boolean = false,
+    onToggleFullscreen: () -> Unit = {}
 ) {
     val contentColor = MaterialTheme.colorScheme.onBackground
     val lyrics = lyricsState.lyrics
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .navigationBarsPadding()
-    ) {
-        // 歌曲信息
-        Row(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .navigationBarsPadding()
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = song.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = contentColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = song.artist,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = contentColor.copy(alpha = 0.55f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            // 歌曲信息（全屏时隐藏，让歌词占满屏幕）
+            AnimatedVisibility(
+                visible = !fullscreen,
+                enter = fadeIn(tween(240)),
+                exit = fadeOut(tween(160))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = song.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = song.artist,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = contentColor.copy(alpha = 0.55f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (!lyrics.isEmpty) {
+                        TagChip(
+                            text = if (lyrics.isYrc) "逐字歌词" else "歌词",
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    RoundedIconButton(
+                        icon = Icons.Rounded.Fullscreen,
+                        contentDescription = "全屏歌词",
+                        onClick = onToggleFullscreen,
+                        size = 38.dp,
+                        iconSize = 20.dp,
+                        tint = contentColor,
+                        container = contentColor.copy(alpha = 0.08f)
+                    )
+                }
             }
-            if (!lyrics.isEmpty) {
-                TagChip(
-                    text = if (lyrics.isYrc) "逐字歌词" else "歌词",
-                    color = MaterialTheme.colorScheme.primary
-                )
+
+            Spacer(Modifier.height(2.dp))
+
+            Box(modifier = Modifier.weight(1f)) {
+                when {
+                    lyricsState.loading && lyrics.isEmpty -> LyricsSkeleton()
+                    lyrics.isEmpty -> EmptyState(
+                        title = if (lyricsState.error == "暂无歌词") "这首歌还没有歌词" else "歌词加载失败",
+                        subtitle = if (lyricsState.error == "暂无歌词") "先闭上眼睛，安静享受旋律吧"
+                        else lyricsState.error ?: "请检查网络后重试",
+                        icon = Icons.Rounded.Subtitles,
+                        actionText = "重新加载",
+                        onAction = onRetry,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    else -> LyricsList(
+                        lyrics = lyrics,
+                        positionMs = positionMs,
+                        contentColor = contentColor,
+                        onSeek = onSeek
+                    )
+                }
             }
-        }
 
-        Spacer(Modifier.height(2.dp))
-
-        Box(modifier = Modifier.weight(1f)) {
-            when {
-                lyricsState.loading && lyrics.isEmpty -> LyricsSkeleton()
-                lyrics.isEmpty -> EmptyState(
-                    title = if (lyricsState.error == "暂无歌词") "这首歌还没有歌词" else "歌词加载失败",
-                    subtitle = if (lyricsState.error == "暂无歌词") "先闭上眼睛，安静享受旋律吧"
-                    else lyricsState.error ?: "请检查网络后重试",
-                    icon = Icons.Rounded.Subtitles,
-                    actionText = "重新加载",
-                    onAction = onRetry,
-                    modifier = Modifier.fillMaxSize()
-                )
-                else -> LyricsList(
-                    lyrics = lyrics,
+            // 毛玻璃控制栏：进度可拖动 + 播放控制（全屏时隐藏，点击歌词区域可恢复）
+            AnimatedVisibility(
+                visible = !fullscreen,
+                enter = fadeIn(tween(240)),
+                exit = fadeOut(tween(160))
+            ) {
+                LyricsControlBar(
                     positionMs = positionMs,
-                    contentColor = contentColor,
-                    onSeek = onSeek
+                    durationMs = durationMs,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
+                    onSeek = onSeek,
+                    onTogglePlay = onTogglePlay,
+                    onPrevious = onPrevious,
+                    onNext = onNext
                 )
             }
         }
 
-        // 毛玻璃控制栏：进度可拖动 + 播放控制
-        LyricsControlBar(
-            positionMs = positionMs,
-            durationMs = durationMs,
-            isPlaying = isPlaying,
-            isBuffering = isBuffering,
-            onSeek = onSeek,
-            onTogglePlay = onTogglePlay,
-            onPrevious = onPrevious,
-            onNext = onNext
-        )
+        // 全屏时右上角悬浮退出按钮
+        AnimatedVisibility(
+            visible = fullscreen,
+            enter = fadeIn(tween(240)),
+            exit = fadeOut(tween(160)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 14.dp, end = 18.dp)
+        ) {
+            RoundedIconButton(
+                icon = Icons.Rounded.FullscreenExit,
+                contentDescription = "退出全屏",
+                onClick = onToggleFullscreen,
+                size = 40.dp,
+                iconSize = 22.dp,
+                tint = contentColor,
+                container = contentColor.copy(alpha = 0.12f)
+            )
+        }
     }
 }
 
