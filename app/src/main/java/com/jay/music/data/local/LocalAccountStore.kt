@@ -39,6 +39,7 @@ class LocalAccountStore(context: Context) {
     private var memoryHash: String? = null
     private var memorySalt: String? = null
     private var memoryIterations: Int = 0
+    private var memoryAvatar: String? = null
 
     fun hasAccount(): Boolean = !username().isNullOrBlank()
 
@@ -66,6 +67,17 @@ class LocalAccountStore(context: Context) {
             .putInt(KEY_ITERATIONS, ITERATIONS)
             .apply()
         return true
+    }
+
+    /** 本机账号头像（本地文件 URI），未设置时为 null */
+    fun avatar(): String? = prefs?.getString(KEY_AVATAR, null) ?: memoryAvatar
+
+    /** 保存头像路径，退出登录后仍然保留 */
+    fun saveAvatar(uri: String?) {
+        memoryAvatar = uri
+        prefs?.edit()?.apply {
+            if (uri == null) remove(KEY_AVATAR) else putString(KEY_AVATAR, uri)
+        }?.apply()
     }
 
     /**
@@ -101,6 +113,7 @@ class LocalAccountStore(context: Context) {
         private const val KEY_SALT = "account_salt"
         private const val KEY_HASH = "account_hash"
         private const val KEY_ITERATIONS = "account_iterations"
+        private const val KEY_AVATAR = "account_avatar"
 
         private const val SALT_BYTES = 16
         private const val HASH_BITS = 256

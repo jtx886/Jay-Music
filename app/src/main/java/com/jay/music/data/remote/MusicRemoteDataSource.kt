@@ -16,10 +16,10 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
- * 第三方音乐接口（网易云 / 酷我）。
+ * 第三方音乐接口。
  *
- * 接口均使用短链或动态 URL，因此统一用 OkHttp 请求，并使用宽松的 JSON 解析，
- * 以兼容接口返回结构的变化。
+ * 搜索、榜单、音频直链、封面、歌词均使用网易云接口；酷我接口已不可用，
+ * 仅保留音频直链与歌词解析，用于兼容历史收藏中的酷我歌曲。
  */
 class MusicRemoteDataSource(
     private val gson: Gson,
@@ -145,82 +145,50 @@ class MusicRemoteDataSource(
         direct.ifBlank { coverPrimary(song.id) }
     }
 
-    /** 歌词接口可能返回 JSON（lrc/tlyric/yrc）或纯文本 LRC */
+    /** 网易云官方歌词接口：返回 JSON（lrc / tlyric / yrc） */
     suspend fun neteaseLyrics(songId: String): String? = withContext(Dispatchers.IO) {
-        getText("https://shturl.cc/9TsDdG0pG5SuSYgcaR5PqnAf03GaY8PNXDIXr$songId")
+        getText("https://music.163.com/api/song/lyric?id=$songId&lv=-1&kv=-1&tv=-1&yv=-1")
     }
 
-    // ------------------------- 酷我 -------------------------
+    // ------------------------- 酷我（仅兼容历史数据） -------------------------
 
-    suspend fun searchKuwo(query: String): List<Song> = withContext(Dispatchers.IO) {
-        val url = "http://shturl.cc/kMogbteoL4dtHD9Y9vDp77pNZkNV7DEtbgeDnGM0dbiB2nCNd${encode(query)}"
-        val text = getText(url) ?: return@withContext emptyList()
-        parseFlexibleSongs(text)
-    }
-
-    suspend fun resolveKuwoStreamUrl(rid: String, quality: AudioQuality): String {
-        // 酷我音频接口为 http 明文；br 参数按音质映射
-        val br = when (quality) {
-            AudioQuality.STANDARD -> "128k"
-            AudioQuality.HIGHER -> "192k"
-            AudioQuality.EXHIGH -> "320k"
-            AudioQuality.LOSSLESS -> "flac"
-            AudioQuality.HIRES -> "flac"
+    /** 酷我音频直链（老接口已失效，改用 anti 服务解析） */
+    suspend fun resolveKuwoStreamUrl(rid: String, quality: AudioQuality): String =
+        withContext(Dispatchers.IO) {
+            val format = when (quality) {
+                AudioQuality.LOSSLESS, AudioQuality.HIRES -> "flac"
+                else -> "mp3"
+            }
+            val id = if (rid.startsWith("MUSIC_")) rid else "MUSIC_$rid"
+            val url = "http://antiserver.kuwo.cn/anti.s?type=convert_url&format=$format&response=url&rid=$id"
+            getText(url)?.trim()?.takeIf { it.startsWith("http") }
+                ?: "http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=$id"
         }
-        return "http://shturl.cc/z4n6uMnEXFXIByeDzw7eQqAlv$rid&type=music&br=$br"
-    }
 
+    /** 酷我歌词：接口返回 JSON 的 lrclist，这里转换成标准 LRC 文本 */
     suspend fun kuwoLyrics(songId: String): String? = withContext(Dispatchers.IO) {
-        getText("http://shturl.cc/GqGMpUE9oWIq9XUvWUmoMVQybnQrb$songId")
+        val text = getText("https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=$songId")
+            ?: return@withContext null
+        runCatching {
+            val list = JsonParser.parseString(text)
+                .asJsonObject.getAsJsonObject("data")
+                ?.getAsJsonArray("lrclist")
+                ?: return@runCatching null
+            list.mapNotNull { element ->
+                val obj = element.takeIf { it.isJsonObject }?.asJsonObject
+                    ?: return@mapNotNull null
+                val content = firstString(obj, "lineLyric") ?: return@mapNotNull null
+                val seconds = firstString(obj, "time")?.toDoubleOrNull() ?: return@mapNotNull null
+                val totalMs = (seconds * 1000).toLong()
+                val minute = totalMs / 60_000
+                val second = (totalMs % 60_000) / 1_000
+                val centis = (totalMs % 1_000) / 10
+                "[%02d:%02d.%02d]%s".format(minute, second, centis, content)
+            }.joinToString("\n").takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     // ------------------------- 解析工具 -------------------------
-
-    /** 宽松解析酷我搜索结果：递归查找同时包含 id / 歌名 / 歌手 的对象 */
-    private fun parseFlexibleSongs(text: String): List<Song> {
-        val root = runCatching { JsonParser.parseString(text) }.getOrNull() ?: return emptyList()
-        val result = LinkedHashMap<String, Song>()
-
-        fun visit(element: JsonElement, depth: Int) {
-            if (depth > 8) return
-            when {
-                element.isJsonArray -> element.asJsonArray.forEach { visit(it, depth + 1) }
-                element.isJsonObject -> {
-                    val obj = element.asJsonObject
-                    val id = firstString(obj, "rid", "musicrid", "musicRid", "songid", "songId", "id")
-                    val name = firstString(obj, "name", "songname", "songName", "title", "musicname")
-                    val artist = firstString(
-                        obj, "artist", "artistsname", "singer", "singerName",
-                        "artistName", "author", "albumartist"
-                    )
-                    if (id != null && name != null && !name.isBlank() && !artist.isNullOrBlank()) {
-                        val cover = firstString(
-                            obj, "pic", "picurl", "albumpic", "albumPic", "img",
-                            "cover", "coverUrl", "artistPic"
-                        )?.takeIf { it.startsWith("http") }
-                        val duration = firstLong(obj, "duration", "durationms", "songTime")
-                            ?.let { if (it in 1..7200) it * 1000 else it } ?: 0L
-                        val song = Song(
-                            id = id,
-                            name = name,
-                            artist = artist,
-                            album = firstString(obj, "album", "albumnam", "albumName") ?: "",
-                            coverUrl = cover ?: "",
-                            durationMs = duration,
-                            source = MusicSource.KUWO
-                        )
-                        result.putIfAbsent("${song.source}:${song.id}", song)
-                    }
-                    obj.entrySet().forEach { (_, value) ->
-                        if (value.isJsonArray || value.isJsonObject) visit(value, depth + 1)
-                    }
-                }
-            }
-        }
-
-        visit(root, 0)
-        return result.values.toList()
-    }
 
     /** 从任意 JSON 中查找音频直链 */
     private fun parseUrlFromJson(text: String): String? {

@@ -3,7 +3,6 @@ package com.jay.music.ui.screens.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jay.music.core.ServiceLocator
-import com.jay.music.data.model.MusicSource
 import com.jay.music.data.model.Song
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -18,23 +17,19 @@ import kotlinx.coroutines.launch
 
 data class SearchUiState(
     val query: String = "",
-    val source: MusicSource = MusicSource.NETEASE,
     val results: List<Song> = emptyList(),
     val isSearching: Boolean = false,
     val hasSearched: Boolean = false,
     val error: String? = null
 )
 
-/** 搜索页：支持网易云 / 酷我音源切换 */
+/** 搜索页：网易云音源搜索 */
 class SearchViewModel : ViewModel() {
 
     private val musicRepository = ServiceLocator.musicRepository
-    private val settings = ServiceLocator.settingsStorage
     private val playbackController = ServiceLocator.playbackController
 
-    private val _uiState = MutableStateFlow(
-        SearchUiState(source = settings.settings.value.source)
-    )
+    private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -65,17 +60,6 @@ class SearchViewModel : ViewModel() {
         searchJob = viewModelScope.launch { performSearch(query) }
     }
 
-    fun setSource(source: MusicSource) {
-        if (source == _uiState.value.source) return
-        settings.setSource(source)
-        _uiState.update { it.copy(source = source, results = emptyList(), hasSearched = false) }
-        val query = _uiState.value.query
-        if (query.isNotBlank()) {
-            searchJob?.cancel()
-            searchJob = viewModelScope.launch { performSearch(query) }
-        }
-    }
-
     fun play(index: Int) {
         val songs = _uiState.value.results
         if (songs.isEmpty()) return
@@ -91,8 +75,7 @@ class SearchViewModel : ViewModel() {
         _uiState.update {
             it.copy(isSearching = true, hasSearched = true, error = null)
         }
-        val source = _uiState.value.source
-        musicRepository.search(query.trim(), source)
+        musicRepository.search(query.trim())
             .onSuccess { songs ->
                 _uiState.update {
                     it.copy(results = songs, isSearching = false, error = null)

@@ -8,7 +8,8 @@
 ## 功能特性
 
 - 本地账号：用户名 + 密码注册 / 登录，密码 PBKDF2 加盐哈希后加密保存
-- 音乐发现：搜索网易云 / 酷我双音源，自动降级与音源切换、音质切换
+- 本地头像：从系统相册选择，压缩后保存在应用私有目录
+- 音乐发现：网易云音源搜索、自动降级与音质切换
 - 播放能力：后台播放、通知栏与锁屏控制、音频焦点处理、播放模式切换
 - 歌词体验：LRC 逐行歌词与 YRC 逐字高亮、翻译歌词、点击歌词跳转播放进度
 - 个人曲库：我的收藏、听歌历史、一键清空（本地持久化）
@@ -21,7 +22,7 @@
 | --- | --- |
 | UI | Jetpack Compose、Material3、Animation、SharedTransition |
 | 播放 | AndroidX Media3 / ExoPlayer、MediaSessionService |
-| 网络 | Retrofit2、OkHttp、Gson（仅第三方音乐接口） |
+| 网络 | OkHttp、Gson（仅第三方音乐接口） |
 | 图片 | Coil、Palette 主色提取 |
 | 存储 | EncryptedSharedPreferences、SharedPreferences |
 | 账号 | 本机 PBKDF2 密码哈希，无后端 |

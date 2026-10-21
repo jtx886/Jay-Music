@@ -23,11 +23,9 @@ class MusicRepository(
         }
     }
 
-    suspend fun search(query: String, source: MusicSource): Result<List<Song>> = runCatching {
-        when (source) {
-            MusicSource.NETEASE -> remote.searchNetease(query)
-            MusicSource.KUWO -> remote.searchKuwo(query)
-        }
+    /** 搜索：酷我接口已失效，统一使用网易云音源 */
+    suspend fun search(query: String): Result<List<Song>> = runCatching {
+        remote.searchNetease(query)
     }
 
     suspend fun randomSong(): Result<Song> = runCatching {

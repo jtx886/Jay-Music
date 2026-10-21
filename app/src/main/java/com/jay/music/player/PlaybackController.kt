@@ -374,6 +374,6 @@ class PlaybackController(
         com.jay.music.data.model.MusicSource.NETEASE ->
             "https://music.163.com/song/media/outer/url?id=${song.id}"
         com.jay.music.data.model.MusicSource.KUWO ->
-            "http://shturl.cc/z4n6uMnEXFXIByeDzw7eQqAlv${song.id}&type=music&br=192k"
+            "http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_${song.id}"
     }
 }

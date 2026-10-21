@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jay.music.core.ServiceLocator
-import com.jay.music.data.model.MusicSource
 import com.jay.music.ui.components.EmptyState
 import com.jay.music.ui.components.MiniPlayerHost
 import com.jay.music.ui.components.RevealItem
@@ -74,7 +73,7 @@ import com.jay.music.ui.theme.BrandMint
 import com.jay.music.ui.theme.BrandPurple
 
 /**
- * 搜索页：关键词搜索 + 网易云/酷我音源切换 + 收藏。
+ * 搜索页：关键词搜索 + 收藏。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -183,29 +182,6 @@ fun SearchScreen(
                 )
             }
 
-            // 音源切换
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "音源",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.width(10.dp))
-                MusicSource.values().forEach { source ->
-                    SourceChip(
-                        source = source,
-                        selected = uiState.source == source,
-                        onClick = { viewModel.setSource(source) }
-                    )
-                    Spacer(Modifier.width(8.dp))
-                }
-            }
-
             // 内容区
             Box(modifier = Modifier.weight(1f)) {
                 when {
@@ -276,35 +252,6 @@ fun SearchScreen(
     }
 }
 
-@Composable
-private fun SourceChip(
-    source: MusicSource,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(
-                if (selected) Brush.linearGradient(listOf(BrandGreen, BrandMint, BrandPurple))
-                else Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                    )
-                )
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp)
-    ) {
-        Text(
-            text = source.label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) Color(0xFF07120B) else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
 /** 未搜索时的探索页 */
 @Composable
 private fun SearchDiscovery(onSuggestionClick: (String) -> Unit) {
@@ -322,7 +269,7 @@ private fun SearchDiscovery(onSuggestionClick: (String) -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "支持网易云与酷我双音源，搜索歌曲、歌手与专辑",
+            text = "搜索歌曲、歌手与专辑",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

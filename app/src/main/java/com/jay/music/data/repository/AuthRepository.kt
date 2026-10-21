@@ -52,7 +52,7 @@ class AuthRepository(
             id = 1L,
             username = storedUsername,
             email = "",
-            avatar = null
+            avatar = accountStore.avatar()
         )
         sessionManager.saveSession(UUID.randomUUID().toString(), user)
         return ApiResult(true, "登录成功")
@@ -65,6 +65,20 @@ class AuthRepository(
         val user = sessionManager.user.value
             ?: return ApiResult(false, "登录状态已失效，请重新登录")
         return ApiResult(true, "获取成功", user)
+    }
+
+    /**
+     * 更新本机头像：仅在账号存储中记录本地文件 URI，并同步到当前会话。
+     */
+    fun updateAvatar(uri: String): ApiResult<Unit> {
+        if (!accountStore.hasAccount()) {
+            return ApiResult(false, "请先注册或登录")
+        }
+        accountStore.saveAvatar(uri)
+        sessionManager.user.value?.let { user ->
+            sessionManager.updateUser(user.copy(avatar = uri))
+        }
+        return ApiResult(true, "头像已更新")
     }
 
     fun logout() = sessionManager.logout()

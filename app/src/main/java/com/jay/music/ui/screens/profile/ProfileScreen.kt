@@ -1,6 +1,13 @@
 package com.jay.music.ui.screens.profile
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +36,7 @@ import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +71,11 @@ import com.jay.music.ui.screens.library.LibraryViewModel
 import com.jay.music.ui.theme.BrandGreen
 import com.jay.music.ui.theme.BrandMint
 import com.jay.music.ui.theme.BrandPurple
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * 我的（Tab2）：毛玻璃用户卡片、主题/音质设置、收藏与历史入口、退出登录。
@@ -78,9 +92,26 @@ fun ProfileScreen(
     val settings by ServiceLocator.settingsStorage.settings.collectAsStateWithLifecycle()
     val playerState by ServiceLocator.playbackController.state.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showQualityDialog by remember { mutableStateOf(false) }
+
+    // 从系统相册选择头像，压缩后保存到应用私有目录（纯本地，不上传）
+    val avatarPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) { saveAvatarImage(context, uri) }
+            if (saved == null) {
+                Toast.makeText(context, "头像保存失败，请重试", Toast.LENGTH_SHORT).show()
+            } else {
+                val result = ServiceLocator.authRepository.updateAvatar(saved)
+                Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         libraryViewModel.events.collect { message ->
@@ -122,7 +153,12 @@ fun ProfileScreen(
             ProfileHeaderCard(
                 user = user,
                 favoriteCount = libraryState.favorites.size,
-                historyCount = libraryState.history.size
+                historyCount = libraryState.history.size,
+                onAvatarClick = {
+                    avatarPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
             )
         }
 
@@ -231,7 +267,7 @@ fun ProfileScreen(
         item(key = "version") {
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Jay Music · v1.1.0",
+                text = "Jay Music · v1.1.1",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth(),
@@ -306,7 +342,8 @@ fun ProfileScreen(
 private fun ProfileHeaderCard(
     user: User?,
     favoriteCount: Int,
-    historyCount: Int
+    historyCount: Int,
+    onAvatarClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(30.dp)
     Box(
@@ -347,11 +384,32 @@ private fun ProfileHeaderCard(
         }
         Column(modifier = Modifier.padding(22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                UserAvatar(
-                    username = user?.username.orEmpty(),
-                    avatarUrl = user?.avatar,
-                    size = 74.dp
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onAvatarClick)
+                ) {
+                    UserAvatar(
+                        username = user?.username.orEmpty(),
+                        avatarUrl = user?.avatar,
+                        size = 74.dp
+                    )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(BrandGreen),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PhotoCamera,
+                            contentDescription = "更换头像",
+                            tint = Color(0xFF07120B),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -361,7 +419,7 @@ private fun ProfileHeaderCard(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "本地账号 · 数据仅保存在本机",
+                        text = "点击头像更换 · 数据仅保存在本机",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -519,3 +577,48 @@ private fun cardColor(): Color =
 private fun borderColor(): Color =
     if (isDarkTheme()) Color.White.copy(alpha = 0.10f)
     else Color.White
+
+/**
+ * 将相册选中的图片裁剪为方形、缩放到 512px 后保存到应用私有目录。
+ * 返回本地 file:// URI，失败时返回 null。
+ */
+private fun saveAvatarImage(context: Context, uri: Uri): String? = runCatching {
+    val resolver = context.contentResolver
+
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    val width = bounds.outWidth
+    val height = bounds.outHeight
+    if (width <= 0 || height <= 0) return null
+
+    var sample = 1
+    while (minOf(width, height) / (sample * 2) >= AVATAR_SIZE) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    val decoded = resolver.openInputStream(uri)
+        ?.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: return null
+
+    val side = minOf(decoded.width, decoded.height)
+    val square = Bitmap.createBitmap(
+        decoded,
+        (decoded.width - side) / 2,
+        (decoded.height - side) / 2,
+        side,
+        side
+    )
+    val scaled = Bitmap.createScaledBitmap(square, AVATAR_SIZE, AVATAR_SIZE, true)
+
+    val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+    val file = File(dir, "avatar_${System.currentTimeMillis()}.jpg")
+    FileOutputStream(file).use { scaled.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+    // 删除旧头像，避免占用空间；文件名唯一也便于 Coil 刷新缓存
+    dir.listFiles()?.filter { it != file }?.forEach { it.delete() }
+
+    if (scaled !== square) scaled.recycle()
+    if (square !== decoded) square.recycle()
+    decoded.recycle()
+
+    Uri.fromFile(file).toString()
+}.getOrNull()
+
+private const val AVATAR_SIZE = 512
