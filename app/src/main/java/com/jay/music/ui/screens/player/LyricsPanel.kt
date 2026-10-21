@@ -7,11 +7,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,9 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
@@ -69,10 +74,10 @@ import com.jay.music.data.model.LyricLine
 import com.jay.music.data.model.Lyrics
 import com.jay.music.data.model.Song
 import com.jay.music.ui.components.EmptyState
-import com.jay.music.ui.components.GlassCard
 import com.jay.music.ui.components.RoundedIconButton
 import com.jay.music.ui.components.ShimmerBlock
 import com.jay.music.ui.components.TagChip
+import com.jay.music.ui.components.isDarkTheme
 import com.jay.music.ui.theme.BrandGreen
 import com.jay.music.ui.theme.BrandMint
 import com.jay.music.util.TimeFormat
@@ -234,12 +239,10 @@ private fun LyricsControlBar(
         .coerceIn(0f, 1f)
     val displayPosition = dragFraction?.let { (it * duration).toLong() } ?: positionMs
 
-    GlassCard(
+    LiquidGlassBar(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(28.dp),
-        padding = 16.dp
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
         Slider(
             value = fraction,
@@ -250,9 +253,9 @@ private fun LyricsControlBar(
             },
             enabled = duration > 0,
             colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
+                thumbColor = BrandMint,
                 activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
+                inactiveTrackColor = Color.White.copy(alpha = 0.18f)
             )
         )
         Row(
@@ -303,6 +306,60 @@ private fun LyricsControlBar(
             )
         }
     }
+}
+
+/** iOS 液态玻璃容器：半透明渐变 + 镜面高光 + 渐变描边 */
+@Composable
+private fun LiquidGlassBar(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(30.dp),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val dark = isDarkTheme()
+    val topTint = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.92f)
+    val bottomTint = if (dark) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.70f)
+    val shadowColor = if (dark) Color.Black.copy(alpha = 0.38f)
+    else Color(0xFF1B2330).copy(alpha = 0.12f)
+
+    Column(
+        modifier = modifier
+            .shadow(22.dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
+            .clip(shape)
+            .background(Brush.verticalGradient(listOf(topTint, bottomTint)))
+            .drawBehind {
+                // 顶部镜面高光
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.30f), Color.Transparent),
+                        startY = 0f,
+                        endY = size.height * 0.42f
+                    )
+                )
+                // 左上角柔和光斑
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.20f), Color.Transparent),
+                        center = Offset(size.width * 0.12f, 0f),
+                        radius = size.width * 0.5f
+                    ),
+                    radius = size.width * 0.5f,
+                    center = Offset(size.width * 0.12f, 0f)
+                )
+            }
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (dark) 0.42f else 0.95f),
+                        Color.White.copy(alpha = 0.08f),
+                        Color.White.copy(alpha = if (dark) 0.20f else 0.55f)
+                    )
+                ),
+                shape = shape
+            )
+            .padding(16.dp),
+        content = content
+    )
 }
 
 /** 歌词页播放 / 暂停按钮 */
@@ -401,29 +458,35 @@ private fun LyricLineItem(
 ) {
     val scale by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0.94f,
-        animationSpec = spring(dampingRatio = 1f, stiffness = 380f),
+        animationSpec = spring(dampingRatio = 0.86f, stiffness = 300f),
         label = "lyricScale"
     )
     val alpha by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0.30f,
-        animationSpec = tween(420),
+        animationSpec = tween(520),
         label = "lyricAlpha"
     )
     val glow by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0f,
-        animationSpec = tween(480),
+        animationSpec = tween(620),
         label = "lyricGlow"
     )
     val highlight = MaterialTheme.colorScheme.primary
-    val dimColor = contentColor.copy(alpha = 0.38f)
+    val dimColor = contentColor.copy(alpha = 0.34f)
 
-    // 行演唱结束时间：优先使用下一行开始时间，其次行时长，最后按字数估算
+    // 逐字涂抹的结束时间：
+    // LRC 只有行时间，按字数估算真实演唱时长（而不是直接用到下一行的间隔），
+    // 否则遇到长间奏时绿色会爬得比人声慢，看起来“跟不上节奏”。
     val lineEndMs = remember(line, nextLineStartMs) {
-        when {
-            nextLineStartMs != null && nextLineStartMs > line.startMs -> nextLineStartMs
-            line.durationMs > 0L -> line.startMs + line.durationMs
-            else -> line.startMs + line.text.length * 220L
+        val available = when {
+            nextLineStartMs != null && nextLineStartMs > line.startMs -> nextLineStartMs - line.startMs
+            line.durationMs > 0L -> line.durationMs
+            else -> Long.MAX_VALUE
         }
+        val estimated = (line.text.length * 175L).coerceAtLeast(700L)
+        val sung = if (available == Long.MAX_VALUE) estimated
+        else estimated.coerceAtMost((available * 0.92f).toLong().coerceAtLeast(500L))
+        line.startMs + sung
     }
 
     val text = remember(line, isCurrent, isYrc, progressMs, lineEndMs, highlight, dimColor) {
@@ -452,22 +515,33 @@ private fun LyricLineItem(
             .padding(vertical = 2.dp),
         contentAlignment = Alignment.Center
     ) {
-        // 当前行的毛玻璃微光背景
+        // 当前行的液态玻璃胶囊背景
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .padding(horizontal = 4.dp)
-                .clip(RoundedCornerShape(18.dp))
+                .padding(horizontal = 2.dp)
+                .clip(RoundedCornerShape(22.dp))
                 .background(
                     Brush.horizontalGradient(
                         listOf(
                             Color.Transparent,
-                            highlight.copy(alpha = 0.10f * glow),
-                            highlight.copy(alpha = 0.14f * glow),
-                            highlight.copy(alpha = 0.10f * glow),
+                            Color.White.copy(alpha = 0.10f * glow),
+                            highlight.copy(alpha = 0.16f * glow),
+                            Color.White.copy(alpha = 0.10f * glow),
                             Color.Transparent
                         )
                     )
+                )
+                .border(
+                    width = 0.8.dp,
+                    brush = Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.30f * glow),
+                            Color.Transparent,
+                            Color.White.copy(alpha = 0.14f * glow)
+                        )
+                    ),
+                    shape = RoundedCornerShape(22.dp)
                 )
         )
         Column(
@@ -486,9 +560,10 @@ private fun LyricLineItem(
             Text(
                 text = text,
                 color = contentColor,
-                fontSize = if (isCurrent) 22.sp else 17.sp,
-                lineHeight = if (isCurrent) 32.sp else 26.sp,
+                fontSize = if (isCurrent) 23.sp else 17.sp,
+                lineHeight = if (isCurrent) 34.sp else 26.sp,
                 fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Medium,
+                letterSpacing = 0.2.sp,
                 textAlign = TextAlign.Center
             )
             val translation = line.translation

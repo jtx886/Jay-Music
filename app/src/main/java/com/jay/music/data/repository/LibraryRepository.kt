@@ -8,10 +8,14 @@ import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.jay.music.data.model.LibrarySong
 import com.jay.music.data.model.Song
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 收藏 / 播放历史仓库（纯本地持久化）：
  * 数据以 JSON 形式保存在普通 SharedPreferences 中，不依赖任何后端服务。
+ * 同时以 StateFlow 暴露内存快照，播放记录写入后各页面可即时同步。
  */
 class LibraryRepository(context: Context) {
 
@@ -22,15 +26,23 @@ class LibraryRepository(context: Context) {
     private val listType = object : TypeToken<List<LibrarySong>>() {}.type
     private val lock = Any()
 
+    private val _favorites = MutableStateFlow(read(KEY_FAVORITES))
+    val favorites: StateFlow<List<LibrarySong>> = _favorites.asStateFlow()
+
+    private val _history = MutableStateFlow(read(KEY_HISTORY))
+    val history: StateFlow<List<LibrarySong>> = _history.asStateFlow()
+
     suspend fun loadFavorites(): Result<List<LibrarySong>> = runCatching {
-        read(KEY_FAVORITES)
+        read(KEY_FAVORITES).also { _favorites.value = it }
     }
 
     suspend fun addFavorite(song: Song): Result<Unit> = runCatching {
         synchronized(lock) {
             val list = read(KEY_FAVORITES)
                 .filterNot { it.song.key == song.key }
-            write(KEY_FAVORITES, listOf(LibrarySong(song, System.currentTimeMillis())) + list)
+            val updated = listOf(LibrarySong(song, System.currentTimeMillis())) + list
+            write(KEY_FAVORITES, updated)
+            _favorites.value = updated
         }
     }
 
@@ -39,25 +51,29 @@ class LibraryRepository(context: Context) {
             val list = read(KEY_FAVORITES)
                 .filterNot { it.song.key == song.key }
             write(KEY_FAVORITES, list)
+            _favorites.value = list
         }
     }
 
     suspend fun loadHistory(): Result<List<LibrarySong>> = runCatching {
-        read(KEY_HISTORY)
+        read(KEY_HISTORY).also { _history.value = it }
     }
 
     suspend fun addHistory(song: Song): Result<Unit> = runCatching {
         synchronized(lock) {
             val list = read(KEY_HISTORY)
                 .filterNot { it.song.key == song.key }
-            val updated = listOf(LibrarySong(song, System.currentTimeMillis())) + list
-            write(KEY_HISTORY, updated.take(HISTORY_LIMIT))
+            val updated = (listOf(LibrarySong(song, System.currentTimeMillis())) + list)
+                .take(HISTORY_LIMIT)
+            write(KEY_HISTORY, updated)
+            _history.value = updated
         }
     }
 
     suspend fun clearHistory(): Result<Unit> = runCatching {
         synchronized(lock) {
             prefs.edit().remove(KEY_HISTORY).apply()
+            _history.value = emptyList()
         }
     }
 
@@ -67,12 +83,13 @@ class LibraryRepository(context: Context) {
         val raw = prefs.getString(key, null) ?: return emptyList()
         return runCatching {
             val array = JsonParser.parseString(raw).asJsonArray
-            // 过滤旧版本遗留的酷我数据，避免已移除的音源枚举反序列化失败
+            // 过滤旧版本遗留的已下线音源数据，避免已移除的音源枚举反序列化失败
             val filtered = JsonArray()
             array.forEach { element ->
                 val source = element.takeIf { it.isJsonObject }?.asJsonObject
                     ?.getAsJsonObject("song")?.get("source")
-                if (source == null || source.asString != "KUWO") {
+                val sourceName = source?.takeIf { it.isJsonPrimitive }?.asString
+                if (sourceName != "KUWO" && sourceName != "SODA") {
                     filtered.add(element)
                 }
             }

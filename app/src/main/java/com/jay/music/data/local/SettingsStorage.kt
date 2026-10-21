@@ -3,7 +3,6 @@ package com.jay.music.data.local
 import android.content.Context
 import com.jay.music.data.model.AppSettings
 import com.jay.music.data.model.AudioQuality
-import com.jay.music.data.model.MusicSource
 import com.jay.music.data.model.PlayMode
 import com.jay.music.data.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 /**
- * 普通配置存储：主题、默认音质、播放模式、默认音源。
+ * 普通配置存储：主题、默认音质、播放模式。
  * 不含任何敏感信息，使用普通 SharedPreferences。
  */
 class SettingsStorage(context: Context) {
@@ -41,8 +40,7 @@ class SettingsStorage(context: Context) {
     private fun load(): AppSettings = AppSettings(
         themeMode = ThemeMode.from(prefs.getString(KEY_THEME, null)),
         quality = AudioQuality.from(prefs.getString(KEY_QUALITY, null)),
-        playMode = PlayMode.from(prefs.getString(KEY_PLAY_MODE, null)),
-        source = MusicSource.from(prefs.getString(KEY_SOURCE, null))
+        playMode = PlayMode.from(prefs.getString(KEY_PLAY_MODE, null))
     )
 
     fun setThemeMode(mode: ThemeMode) {
@@ -58,11 +56,6 @@ class SettingsStorage(context: Context) {
     fun setPlayMode(mode: PlayMode) {
         prefs.edit().putString(KEY_PLAY_MODE, mode.name).apply()
         _settings.update { it.copy(playMode = mode) }
-    }
-
-    fun setSource(source: MusicSource) {
-        prefs.edit().putString(KEY_SOURCE, source.name).apply()
-        _settings.update { it.copy(source = source) }
     }
 
     // ------------------------- 搜索历史 -------------------------
@@ -93,7 +86,6 @@ class SettingsStorage(context: Context) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_QUALITY = "default_quality"
         private const val KEY_PLAY_MODE = "play_mode"
-        private const val KEY_SOURCE = "default_source"
         private const val KEY_SEARCH_HISTORY = "search_history"
         private const val KEY_LISTEN_MS = "total_listen_ms"
         private const val SEPARATOR = "\u0001"

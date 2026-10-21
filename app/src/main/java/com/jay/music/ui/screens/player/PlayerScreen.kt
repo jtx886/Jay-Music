@@ -476,7 +476,7 @@ private fun AlbumPlayerContent(
                 contentAlignment = Alignment.Center
             ) {
                 TagChip(
-                    text = "正在播放 · ${song.source.label}",
+                    text = "正在播放 · Jay Music",
                     color = if (dark) BrandGreen else MaterialTheme.colorScheme.primary
                 )
             }

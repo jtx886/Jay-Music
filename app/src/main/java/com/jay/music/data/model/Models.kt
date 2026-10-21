@@ -2,14 +2,12 @@ package com.jay.music.data.model
 
 import androidx.annotation.Keep
 
-/** 音源类型 */
+/** 音源类型（当前仅保留网易云） */
 enum class MusicSource(val label: String) {
-    NETEASE("网易云"),
-    SODA("汽水");
+    NETEASE("网易云");
 
     companion object {
-        fun from(value: String?): MusicSource =
-            values().firstOrNull { it.name.equals(value, true) } ?: NETEASE
+        fun from(value: String?): MusicSource = NETEASE
     }
 }
 
@@ -61,8 +59,7 @@ enum class ThemeMode(val label: String) {
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val quality: AudioQuality = AudioQuality.HIGHER,
-    val playMode: PlayMode = PlayMode.LIST_LOOP,
-    val source: MusicSource = MusicSource.NETEASE
+    val playMode: PlayMode = PlayMode.LIST_LOOP
 )
 
 @Keep

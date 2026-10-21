@@ -5,9 +5,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -64,7 +61,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jay.music.core.ServiceLocator
-import com.jay.music.data.model.MusicSource
 import com.jay.music.ui.components.EmptyState
 import com.jay.music.ui.components.MiniPlayerHost
 import com.jay.music.ui.components.RevealItem
@@ -196,13 +191,6 @@ fun SearchScreen(
                 )
             }
 
-            // 音源切换（网易云 / 汽水），切换后首页榜单同步刷新
-            SourceSwitcher(
-                current = uiState.source,
-                onSelect = viewModel::selectSource,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
-            )
-
             // 内容区
             Box(modifier = Modifier.weight(1f)) {
                 when {
@@ -222,7 +210,7 @@ fun SearchScreen(
                     uiState.results.isNotEmpty() -> {
                         Column(Modifier.fillMaxSize()) {
                             Text(
-                                text = "${uiState.source.label} · 找到 ${uiState.results.size} 首相关歌曲",
+                                text = "找到 ${uiState.results.size} 首相关歌曲",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
@@ -275,77 +263,6 @@ fun SearchScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 12.dp, vertical = 10.dp)
-        )
-    }
-}
-
-/** 音源切换胶囊：网易云 / 汽水 */
-@Composable
-private fun SourceSwitcher(
-    current: MusicSource,
-    onSelect: (MusicSource) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "音源",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(10.dp))
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                .padding(3.dp)
-        ) {
-            MusicSource.entries.forEach { source ->
-                val selected = source == current
-                val background by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.primary
-                    else Color.Transparent,
-                    animationSpec = tween(260),
-                    label = "sourceBg"
-                )
-                val textColor by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = tween(260),
-                    label = "sourceFg"
-                )
-                val scale by animateFloatAsState(
-                    targetValue = if (selected) 1f else 0.95f,
-                    animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
-                    label = "sourceScale"
-                )
-                Box(
-                    modifier = Modifier
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .clip(RoundedCornerShape(50))
-                        .background(background)
-                        .clickable { onSelect(source) }
-                        .padding(horizontal = 18.dp, vertical = 7.dp)
-                ) {
-                    Text(
-                        text = source.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = textColor
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = "搜索与首页同步",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
         )
     }
 }

@@ -39,6 +39,18 @@ class LibraryViewModel : ViewModel() {
 
     init {
         loadFavorites()
+        loadHistory()
+        // 播放器写入历史 / 收藏后，各页面即时同步（无需手动刷新）
+        viewModelScope.launch {
+            repository.favorites.collect { list ->
+                _uiState.update { it.copy(favorites = list) }
+            }
+        }
+        viewModelScope.launch {
+            repository.history.collect { list ->
+                _uiState.update { it.copy(history = list) }
+            }
+        }
     }
 
     fun favoriteKeys(): Set<String> = _uiState.value.favorites.map { it.song.key }.toSet()

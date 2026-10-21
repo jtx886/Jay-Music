@@ -12,7 +12,6 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import com.jay.music.R
 import com.jay.music.data.local.SettingsStorage
 import com.jay.music.data.model.AudioQuality
 import com.jay.music.data.model.PlayMode
@@ -124,15 +123,13 @@ class PlaybackController(
 
     init {
         connectService()
-        // 高频刷新进度，供歌词逐字高亮与进度条使用
+        // 高频刷新进度（约 33ms），让逐字歌词与音乐节奏保持同步
         scope.launch {
             while (isActive) {
                 controller?.let { player ->
-                    if (player.isPlaying) {
-                        _position.value = player.currentPosition.coerceAtLeast(0L)
-                    }
+                    _position.value = player.currentPosition.coerceAtLeast(0L)
                 }
-                delay(70)
+                delay(33)
             }
         }
         // 真实听歌时长：按实际播放的墙钟时间累计，暂停/缓冲时不计入
@@ -182,6 +179,8 @@ class PlaybackController(
         val index = startIndex.coerceIn(0, songs.lastIndex)
         val song = songs[index]
         val quality = _state.value.quality
+        // 重新播放同一首歌也应刷新听歌历史时间与顺序
+        lastRecordedKey = null
 
         _state.update {
             it.copy(
@@ -390,13 +389,8 @@ class PlaybackController(
 
     /**
      * 队列中未解析歌曲使用的临时直链。
-     * 汽水直链必须动态解析，未解析时先使用内置静音占位音频，
-     * 避免空 URI 让播放器进入 IDLE 导致通知栏被移除。
+     * 网易云外链直链（播放到该曲时会再解析并替换为真实地址）。
      */
-    private fun fallbackUrl(song: Song): String = when (song.source) {
-        com.jay.music.data.model.MusicSource.NETEASE ->
-            "https://music.163.com/song/media/outer/url?id=${song.id}"
-        com.jay.music.data.model.MusicSource.SODA ->
-            "android.resource://${context.packageName}/${R.raw.silent_placeholder}"
-    }
+    private fun fallbackUrl(song: Song): String =
+        "https://music.163.com/song/media/outer/url?id=${song.id}"
 }

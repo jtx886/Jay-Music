@@ -16,9 +16,9 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
- * 第三方音乐接口。
+ * 第三方音乐接口（网易云单音源）。
  *
- * 搜索使用汽水音乐 + 网易云双音源；音频直链、歌词与封面分别走各自平台接口。
+ * 搜索、音频直链、歌词与封面统一走网易云接口。
  */
 class MusicRemoteDataSource(
     private val gson: Gson,
@@ -152,172 +152,6 @@ class MusicRemoteDataSource(
         getText("https://music.163.com/api/song/lyric?id=$songId&lv=-1&kv=-1&tv=-1&yv=-1")
     }
 
-    // ------------------------- 汽水音乐 -------------------------
-
-    /** 汽水音乐搜索（Android 端接口，无需登录） */
-    suspend fun searchSoda(query: String): List<Song> = withContext(Dispatchers.IO) {
-        val url = buildUrl(SODA_SEARCH_URL, sodaSearchParams(query)) ?: return@withContext emptyList()
-        val text = getText(url, SODA_HEADERS) ?: return@withContext emptyList()
-        runCatching {
-            val root = JsonParser.parseString(text).asJsonObject
-            val groups = root.getAsJsonArray("result_groups") ?: return@runCatching emptyList()
-            groups.flatMap { group ->
-                val obj = group.takeIf { it.isJsonObject }?.asJsonObject ?: return@flatMap emptyList()
-                val data = obj.getAsJsonArray("data") ?: return@flatMap emptyList()
-                data.mapNotNull { item ->
-                    val entity = item.takeIf { it.isJsonObject }?.asJsonObject
-                        ?.getAsJsonObject("entity") ?: return@mapNotNull null
-                    val track = entity.getAsJsonObject("track") ?: return@mapNotNull null
-                    parseSodaSong(track)
-                }
-            }
-        }.getOrDefault(emptyList())
-    }
-
-    /** 汽水音乐热歌榜（公开榜单接口，无需登录） */
-    suspend fun sodaChart(): List<Song> = withContext(Dispatchers.IO) {
-        val text = getText(SODA_CHART_URL, SODA_HEADERS) ?: return@withContext emptyList()
-        runCatching {
-            val root = JsonParser.parseString(text).asJsonObject
-            val chart = root.getAsJsonObject("chart") ?: return@runCatching emptyList()
-            val ranks = chart.getAsJsonArray("track_ranks") ?: return@runCatching emptyList()
-            ranks.mapNotNull { item ->
-                val track = item.takeIf { it.isJsonObject }?.asJsonObject
-                    ?.getAsJsonObject("track") ?: return@mapNotNull null
-                parseSodaSong(track)
-            }
-        }.getOrDefault(emptyList())
-    }
-
-    private fun parseSodaSong(track: JsonObject): Song? {
-        val id = firstString(track, "id") ?: return null
-        val name = firstString(track, "name") ?: return null
-        return Song(
-            id = id,
-            name = name,
-            artist = sodaArtists(track) ?: "未知歌手",
-            album = track.getAsJsonObject("album")?.let { firstString(it, "name") } ?: "",
-            coverUrl = sodaCoverUrl(track.getAsJsonObject("album")?.get("url_cover")),
-            durationMs = firstLong(track, "duration") ?: 0L,
-            source = MusicSource.SODA
-        )
-    }
-
-    /** 汽水音乐音频直链（H5 SEO 接口 -> 播放信息） */
-    suspend fun resolveSodaStreamUrl(trackId: String, quality: AudioQuality): String =
-        withContext(Dispatchers.IO) {
-            val seoText = sodaSeoText(trackId) ?: return@withContext ""
-            val playInfoUrl = runCatching {
-                JsonParser.parseString(seoText).asJsonObject
-                    .getAsJsonObject("track_player")
-                    ?.get("url_player_info")?.asString
-            }.getOrNull().orEmpty()
-            if (playInfoUrl.isBlank()) return@withContext ""
-
-            val playText = getText(playInfoUrl) ?: return@withContext ""
-            val list = runCatching {
-                JsonParser.parseString(playText).asJsonObject
-                    .getAsJsonObject("Result")
-                    ?.getAsJsonObject("Data")
-                    ?.getAsJsonArray("PlayInfoList")
-            }.getOrNull() ?: return@withContext ""
-
-            val wanted = when (quality) {
-                AudioQuality.STANDARD -> listOf("medium")
-                AudioQuality.HIGHER -> listOf("higher")
-                AudioQuality.EXHIGH -> listOf("highest")
-                AudioQuality.LOSSLESS -> listOf("lossless")
-                AudioQuality.HIRES -> listOf("hi_res", "spatial", "lossless")
-            }
-            val items = list.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject }
-                .filter { firstString(it, "EncryptionMethod").isNullOrBlank() && firstString(it, "PlayAuth").isNullOrBlank() }
-            val picked = wanted.firstNotNullOfOrNull { q ->
-                items.firstOrNull { firstString(it, "Quality") == q }
-            } ?: items.firstOrNull { firstString(it, "Quality") == "highest" }
-                ?: items.firstOrNull()
-            picked?.let { firstString(it, "MainPlayUrl") ?: firstString(it, "BackupPlayUrl") }.orEmpty()
-        }
-
-    /** 汽水音乐歌词：KRC 逐字格式转换为 YRC 后交给统一解析器 */
-    suspend fun sodaLyrics(trackId: String): String? = withContext(Dispatchers.IO) {
-        val seoText = sodaSeoText(trackId) ?: return@withContext null
-        val content = runCatching {
-            JsonParser.parseString(seoText).asJsonObject
-                .getAsJsonObject("lyric")
-                ?.let { firstString(it, "content") }
-        }.getOrNull() ?: return@withContext null
-        if (content.isBlank()) return@withContext null
-        sodaKrcToYrc(content)
-    }
-
-    private fun sodaSeoText(trackId: String): String? {
-        val url = buildUrl(
-            SODA_SEO_URL,
-            linkedMapOf("track_id" to trackId, "device_platform" to "web")
-        ) ?: return null
-        return getText(url)
-    }
-
-    /** KRC：[start,duration]<offset,duration,0>字 -> YRC：[start,duration](绝对时间,duration,0)字 */
-    private fun sodaKrcToYrc(content: String): String {
-        if (!content.contains("<") || content.contains("[00:")) return content
-        return content.lineSequence().mapNotNull { raw ->
-            val line = raw.trim()
-            val lineMatch = Regex("""^\[(\d+),(\d+)](.*)$""").matchEntire(line)
-                ?: return@mapNotNull null
-            val lineStart = lineMatch.groupValues[1].toLong()
-            val lineDuration = lineMatch.groupValues[2]
-            val body = lineMatch.groupValues[3]
-            val words = Regex("""<(\d+),(\d+),-?\d+>([^<]*)""").findAll(body).map { word ->
-                val offset = word.groupValues[1].toLong()
-                val duration = word.groupValues[2]
-                val text = word.groupValues[3]
-                "(${lineStart + offset},$duration,0)$text"
-            }.joinToString("")
-            val text = words.ifBlank { body.trim() }
-            if (text.isBlank()) return@mapNotNull null
-            "[$lineStart,$lineDuration]$text"
-        }.joinToString("\n").takeIf { it.isNotBlank() } ?: content
-    }
-
-    private fun sodaArtists(track: JsonObject): String? {
-        val artists = track.getAsJsonArray("artists") ?: return null
-        return artists.mapNotNull { element ->
-            element.takeIf { it.isJsonObject }?.asJsonObject?.let { firstString(it, "name") }
-        }.takeIf { it.isNotEmpty() }?.joinToString(",")
-    }
-
-    private fun sodaCoverUrl(cover: JsonElement?): String {
-        val obj = cover?.takeIf { it.isJsonObject }?.asJsonObject ?: return ""
-        val uri = firstString(obj, "uri") ?: return ""
-        val prefix = firstString(obj, "template_prefix") ?: ""
-        val base = obj.getAsJsonArray("urls")?.firstOrNull()
-            ?.takeIf { it.isJsonPrimitive }?.asString ?: return ""
-        return if (prefix.isNotBlank()) "$base$uri~$prefix-resize:960:960.png" else "$base$uri"
-    }
-
-    private fun sodaSearchParams(query: String): Map<String, String> = linkedMapOf(
-        "q" to query,
-        "cursor" to "0",
-        "count" to "20",
-        "aid" to "386088",
-        "device_platform" to "android",
-        "os" to "android",
-        "app_name" to "luna",
-        "version_code" to "100198030",
-        "version_name" to "19.8.0",
-        "channel" to "xiaomi_8478_64",
-        "device_id" to "2204957404565290",
-        "iid" to "2204957404569386",
-        "cdid" to "46556f98-1720-4248-83da-62b74b60b46a",
-        "os_api" to "35",
-        "os_version" to "15",
-        "device_model" to "ABR-AL80",
-        "device_brand" to "HUAWEI",
-        "ac" to "wifi",
-        "language" to "zh"
-    )
-
     // ------------------------- 网易封面补齐 -------------------------
 
     private fun fillNeteaseCovers(songs: List<Song>): List<Song> {
@@ -449,16 +283,5 @@ class MusicRemoteDataSource(
     companion object {
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
-
-        private const val SODA_SEARCH_URL = "https://api.qishui.com/luna/search/track"
-        private const val SODA_SEO_URL = "https://beta-luna.douyin.com/luna/h5/seo_track"
-        private const val SODA_CHART_URL =
-            "https://api5-lf.qishui.com/luna/charts/7036274230471712007?charge=0"
-
-        private val SODA_HEADERS = mapOf(
-            "User-Agent" to
-                "com.luna.music/100198030 (Linux; U; Android 15; zh_CN_#Hans; ABR-AL80; Build/V417IR;tt-ok/3.12.13.19)",
-            "content-type" to "application/json; charset=UTF-8"
-        )
     }
 }
