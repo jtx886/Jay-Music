@@ -190,17 +190,23 @@ fun LyricsPanel(
                 }
             }
 
-            // 毛玻璃控制栏：全屏模式下同样保留播放控制与进度调节
-            LyricsControlBar(
-                positionMs = positionMs,
-                durationMs = durationMs,
-                isPlaying = isPlaying,
-                isBuffering = isBuffering,
-                onSeek = onSeek,
-                onTogglePlay = onTogglePlay,
-                onPrevious = onPrevious,
-                onNext = onNext
-            )
+            // 毛玻璃控制栏：全屏歌词时隐藏，只保留干净的歌词画面
+            AnimatedVisibility(
+                visible = !fullscreen,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(140))
+            ) {
+                LyricsControlBar(
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
+                    onSeek = onSeek,
+                    onTogglePlay = onTogglePlay,
+                    onPrevious = onPrevious,
+                    onNext = onNext
+                )
+            }
         }
 
         // 全屏时右上角悬浮退出按钮
@@ -455,6 +461,8 @@ private fun LyricsList(
     // 按屏幕帧率推进的渲染进度，保证逐字涂抹紧跟音乐节奏
     val renderedPosition = rememberSmoothPosition(positionMs, isPlaying)
     val currentIndex = lyrics.indexAt(renderedPosition)
+    // 这首歌自己的演唱速度（字/毫秒），用于 LRC 逐字时长的估算
+    val charRate = remember(lyrics) { estimateSongCharRate(lyrics) }
     val listState = rememberLazyListState()
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -485,6 +493,7 @@ private fun LyricsList(
                 LyricLineItem(
                     line = line,
                     nextLineStartMs = lyrics.lines.getOrNull(index + 1)?.startMs,
+                    charRate = charRate,
                     isCurrent = isCurrent,
                     progressMs = if (isCurrent) renderedPosition else 0L,
                     isYrc = lyrics.isYrc && line.words.isNotEmpty(),
@@ -496,11 +505,40 @@ private fun LyricsList(
     }
 }
 
+/**
+ * 估算一首歌自己的演唱速度（字/毫秒）：
+ * 取整首歌词里「每行字数 ÷ 该行到下一行的间隔」的分位数，
+ * 过滤制作信息行与超长间奏，避免个别行把整首带偏。
+ * 这样快歌涂抹得快、慢歌涂抹得慢，逐字渲染才能贴着这首歌的节奏。
+ */
+private fun estimateSongCharRate(lyrics: Lyrics): Float {
+    val rates = mutableListOf<Float>()
+    lyrics.lines.forEachIndexed { index, line ->
+        val next = lyrics.lines.getOrNull(index + 1) ?: return@forEachIndexed
+        val gap = next.startMs - line.startMs
+        val text = line.text.trim()
+        val chars = text.count { !it.isWhitespace() }
+        val isCredit = text.contains(':') || text.contains('：') ||
+            listOf(
+                "作词", "作曲", "编曲", "制作", "吉他", "贝斯", "鼓", "和声",
+                "混音", "母带", "录音", "监制", "出品", "发行", "统筹", "策划", "版权"
+            ).any { text.contains(it) }
+        if (!isCredit && chars >= 4 && gap in 1_000L..12_000L) {
+            rates += chars.toFloat() / gap
+        }
+    }
+    if (rates.isEmpty()) return 1f / 200f
+    rates.sort()
+    // 取 60% 分位：略微偏快，保证绿色始终踩在字上而不是落在后面
+    return rates[(rates.size * 0.6f).toInt().coerceAtMost(rates.lastIndex)]
+}
+
 /** 单行歌词：当前行放大高亮，逐字涂抹绿色，YRC 按字词真实时间、LRC 按行时长均匀分配 */
 @Composable
 private fun LyricLineItem(
     line: LyricLine,
     nextLineStartMs: Long?,
+    charRate: Float,
     isCurrent: Boolean,
     progressMs: Long,
     isYrc: Boolean,
@@ -509,34 +547,39 @@ private fun LyricLineItem(
 ) {
     val scale by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0.94f,
-        animationSpec = spring(dampingRatio = 0.86f, stiffness = 300f),
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 700f),
         label = "lyricScale"
     )
     val alpha by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0.30f,
-        animationSpec = tween(520),
+        animationSpec = tween(180),
         label = "lyricAlpha"
     )
     val glow by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0f,
-        animationSpec = tween(620),
+        animationSpec = tween(240),
         label = "lyricGlow"
     )
     val highlight = MaterialTheme.colorScheme.primary
     val dimColor = contentColor.copy(alpha = 0.34f)
 
     // 逐字涂抹的结束时间：
-    // LRC 只有行时间，按字数估算真实演唱时长（而不是直接用到下一行的间隔），
-    // 否则遇到长间奏时绿色会爬得比人声慢，看起来“跟不上节奏”。
-    val lineEndMs = remember(line, nextLineStartMs) {
+    // LRC 只有行时间，用这首歌自己的演唱速度估算真实演唱时长（而不是固定每字多少毫秒），
+    // 快歌自动加快、慢歌自动放慢，长间奏时也不会爬得比人声慢。
+    val lineEndMs = remember(line, nextLineStartMs, charRate) {
         val available = when {
             nextLineStartMs != null && nextLineStartMs > line.startMs -> nextLineStartMs - line.startMs
             line.durationMs > 0L -> line.durationMs
             else -> Long.MAX_VALUE
         }
-        val estimated = (line.text.length * 175L).coerceAtLeast(700L)
+        val chars = line.text.count { !it.isWhitespace() }.coerceAtLeast(1)
+        val estimated = (chars / charRate).toLong().coerceAtLeast(400L)
         val sung = if (available == Long.MAX_VALUE) estimated
-        else estimated.coerceAtMost((available * 0.92f).toLong().coerceAtLeast(500L))
+        else {
+            val minSung = (available * 0.40f).toLong().coerceAtLeast(300L)
+            val maxSung = (available * 0.95f).toLong().coerceAtLeast(400L)
+            estimated.coerceIn(minSung, maxSung)
+        }
         line.startMs + sung
     }
 
