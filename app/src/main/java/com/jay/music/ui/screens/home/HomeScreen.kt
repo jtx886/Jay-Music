@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -103,6 +104,8 @@ fun HomeScreen(
     val favoriteKeys = remember(libraryState.favorites) {
         libraryState.favorites.map { it.song.key }.toSet()
     }
+    // 列表滚动状态提升到页面级，避免内部状态被重建导致滚动位置回到顶部
+    val listState = rememberLazyListState()
 
     Box(modifier = modifier.fillMaxSize()) {
         if (uiState.isLoading) {
@@ -114,6 +117,7 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding(),
@@ -272,18 +276,18 @@ fun HomeScreen(
                             items = uiState.songs,
                             key = { _, song -> "row-${song.key}" }
                         ) { index, song ->
-                            RevealItem(index = index) {
-                                SongRow(
-                                    song = song,
-                                    onClick = { viewModel.play(index) },
-                                    modifier = Modifier.padding(horizontal = 10.dp),
-                                    isPlaying = playerState.currentSong?.key == song.key,
-                                    isFavorite = favoriteKeys.contains(song.key),
-                                    onToggleFavorite = {
-                                        libraryViewModel.toggleFavorite(song)
-                                    }
-                                )
-                            }
+                            // 长列表不做逐项入场动画：动画会让行高从 0 开始变化，
+                            // 滚动回看时会造成位置跳动，甚至被拉回列表顶部
+                            SongRow(
+                                song = song,
+                                onClick = { viewModel.play(index) },
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                isPlaying = playerState.currentSong?.key == song.key,
+                                isFavorite = favoriteKeys.contains(song.key),
+                                onToggleFavorite = {
+                                    libraryViewModel.toggleFavorite(song)
+                                }
+                            )
                         }
 
                         item(key = "footer") {
