@@ -25,6 +25,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,13 +58,14 @@ class PlaybackService : MediaSessionService() {
         notificationProvider = LyricsNotificationProvider(this)
         setMediaNotificationProvider(notificationProvider)
 
+        val allowConcurrent = ServiceLocator.settingsStorage.settings.value.allowConcurrentPlayback
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .setUsage(C.USAGE_MEDIA)
                     .build(),
-                true // 自动处理音频焦点
+                !allowConcurrent // 关闭「同时播放」时自动处理音频焦点
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -89,6 +93,22 @@ class PlaybackService : MediaSessionService() {
         })
 
         startLyricSync()
+
+        // 「与其他应用同时播放」开关变化时立即切换音频焦点策略，无需重启播放
+        scope.launch {
+            ServiceLocator.settingsStorage.settings
+                .map { it.allowConcurrentPlayback }
+                .distinctUntilChanged()
+                .collect { allow ->
+                    (mediaSession?.player as? ExoPlayer)?.setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                            .setUsage(C.USAGE_MEDIA)
+                            .build(),
+                        !allow
+                    )
+                }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

@@ -40,7 +40,8 @@ class SettingsStorage(context: Context) {
     private fun load(): AppSettings = AppSettings(
         themeMode = ThemeMode.from(prefs.getString(KEY_THEME, null)),
         quality = AudioQuality.from(prefs.getString(KEY_QUALITY, null)),
-        playMode = PlayMode.from(prefs.getString(KEY_PLAY_MODE, null))
+        playMode = PlayMode.from(prefs.getString(KEY_PLAY_MODE, null)),
+        allowConcurrentPlayback = prefs.getBoolean(KEY_ALLOW_CONCURRENT, false)
     )
 
     fun setThemeMode(mode: ThemeMode) {
@@ -56,6 +57,12 @@ class SettingsStorage(context: Context) {
     fun setPlayMode(mode: PlayMode) {
         prefs.edit().putString(KEY_PLAY_MODE, mode.name).apply()
         _settings.update { it.copy(playMode = mode) }
+    }
+
+    /** 允许 / 禁止和其他应用同时播放 */
+    fun setAllowConcurrentPlayback(allow: Boolean) {
+        prefs.edit().putBoolean(KEY_ALLOW_CONCURRENT, allow).apply()
+        _settings.update { it.copy(allowConcurrentPlayback = allow) }
     }
 
     // ------------------------- 搜索历史 -------------------------
@@ -86,6 +93,7 @@ class SettingsStorage(context: Context) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_QUALITY = "default_quality"
         private const val KEY_PLAY_MODE = "play_mode"
+        private const val KEY_ALLOW_CONCURRENT = "allow_concurrent_playback"
         private const val KEY_SEARCH_HISTORY = "search_history"
         private const val KEY_LISTEN_MS = "total_listen_ms"
         private const val SEPARATOR = "\u0001"

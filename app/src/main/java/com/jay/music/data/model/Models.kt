@@ -59,7 +59,9 @@ enum class ThemeMode(val label: String) {
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val quality: AudioQuality = AudioQuality.HIGHER,
-    val playMode: PlayMode = PlayMode.LIST_LOOP
+    val playMode: PlayMode = PlayMode.LIST_LOOP,
+    /** 允许和其他应用同时播放（不抢占音频焦点），默认关闭 */
+    val allowConcurrentPlayback: Boolean = false
 )
 
 @Keep
