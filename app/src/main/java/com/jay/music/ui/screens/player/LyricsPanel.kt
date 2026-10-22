@@ -149,7 +149,7 @@ fun LyricsPanel(
                     }
                     if (!lyrics.isEmpty) {
                         TagChip(
-                            text = if (lyrics.isYrc) "逐字歌词" else "歌词",
+                            text = "逐字歌词",
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(Modifier.width(8.dp))
@@ -495,6 +495,7 @@ private fun LyricsList(
                     nextLineStartMs = lyrics.lines.getOrNull(index + 1)?.startMs,
                     charRate = charRate,
                     isCurrent = isCurrent,
+                    isPast = index < currentIndex,
                     progressMs = if (isCurrent) renderedPosition else 0L,
                     isYrc = lyrics.isYrc && line.words.isNotEmpty(),
                     contentColor = contentColor,
@@ -540,6 +541,7 @@ private fun LyricLineItem(
     nextLineStartMs: Long?,
     charRate: Float,
     isCurrent: Boolean,
+    isPast: Boolean,
     progressMs: Long,
     isYrc: Boolean,
     contentColor: Color,
@@ -551,7 +553,7 @@ private fun LyricLineItem(
         label = "lyricScale"
     )
     val alpha by animateFloatAsState(
-        targetValue = if (isCurrent) 1f else 0.30f,
+        targetValue = if (isCurrent) 1f else if (isPast) 0.46f else 0.30f,
         animationSpec = tween(180),
         label = "lyricAlpha"
     )
@@ -583,23 +585,35 @@ private fun LyricLineItem(
         line.startMs + sung
     }
 
-    val text = remember(line, isCurrent, isYrc, progressMs, lineEndMs, highlight, dimColor) {
+    // 这一行每个字的演唱时间轴（LRC 用估算值）：把停顿、英文整词、拉长音都算进去
+    val timeline = remember(line, lineEndMs) {
+        buildLineTimeline(line.text, line.startMs, lineEndMs)
+    }
+
+    val text = remember(line, isCurrent, isPast, isYrc, progressMs, lineEndMs, timeline, highlight, dimColor) {
         when {
-            !isCurrent -> AnnotatedString(line.text)
-            isYrc -> buildYrcAnnotatedString(
+            isCurrent && isYrc -> buildYrcAnnotatedString(
                 line = line,
                 progressMs = progressMs,
                 dimColor = dimColor,
                 highlightColor = highlight
             )
-            else -> buildProgressiveAnnotatedString(
+            isCurrent -> buildProgressiveAnnotatedString(
                 text = line.text,
-                startMs = line.startMs,
-                endMs = lineEndMs,
+                timeline = timeline,
                 progressMs = progressMs,
                 dimColor = dimColor,
                 highlightColor = highlight
             )
+            isPast -> buildAnnotatedString {
+                // 唱过的行保留淡绿，整屏看上去始终是逐字唱过来的
+                withStyle(SpanStyle(color = lerp(dimColor, highlight, 0.62f))) {
+                    append(line.text)
+                }
+            }
+            else -> buildAnnotatedString {
+                withStyle(SpanStyle(color = contentColor)) { append(line.text) }
+            }
         }
     }
 
@@ -676,27 +690,80 @@ private fun LyricLineItem(
 }
 
 /**
+ * 逐字时间轴：
+ * LRC 只有行时间，所以按「这首歌自己的语速」把行时长分配给每个字。
+ * 分配不是简单均分，而是按字重加权：
+ * - 中文每字 1 份
+ * - 英文 / 数字整词算一份（按词长加权），让英文整词一起变绿，而不是逐字母
+ * - 逗号、顿号后有停顿，句号、问号、省略号后停顿更长
+ * - 连续重复字（如「啊——」「慢慢」）自动拉长
+ * 返回值长度 = 字符数 + 1，表示每个字（码点）的起止时间边界。
+ */
+private fun buildLineTimeline(text: String, startMs: Long, endMs: Long): LongArray {
+    val chars = text.toList()
+    if (chars.isEmpty()) return longArrayOf(startMs, startMs)
+    val weights = FloatArray(chars.size)
+    for (i in chars.indices) weights[i] = charWeight(chars, i)
+    val total = weights.sum().takeIf { it > 0f } ?: 1f
+    val available = (endMs - startMs).coerceAtLeast(1L)
+
+    val boundaries = LongArray(chars.size + 1)
+    var acc = 0f
+    for (i in chars.indices) {
+        boundaries[i] = startMs + (available * acc / total).toLong()
+        acc += weights[i]
+    }
+    boundaries[chars.size] = startMs + available
+    return boundaries
+}
+
+private fun isAsciiWordChar(c: Char): Boolean =
+    c.code < 128 && (c.isLetterOrDigit() || c == '\'' || c == '-')
+
+private fun charWeight(chars: List<Char>, index: Int): Float {
+    val c = chars[index]
+    return when {
+        c.isWhitespace() -> 0.18f
+        // 英文单词：只给词首赋予权重，整词在同一时刻一起变绿
+        isAsciiWordChar(c) && !(index > 0 && isAsciiWordChar(chars[index - 1])) -> {
+            var len = 0
+            var j = index
+            while (j < chars.size && isAsciiWordChar(chars[j])) {
+                len++
+                j++
+            }
+            (len * 0.55f).coerceAtLeast(0.9f)
+        }
+        isAsciiWordChar(c) -> 0f
+        // 停顿：逗号顿号短停，句号问号省略号长停
+        c == ',' || c == '，' || c == '、' || c == ';' || c == '；' -> 0.75f
+        c == '.' || c == '。' || c == '!' || c == '！' || c == '?' || c == '？' -> 1.15f
+        c == '…' || c == '~' || c == '～' || c == '—' -> 1.25f
+        // 连续重复字拉长，模拟拖腔
+        index > 0 && c == chars[index - 1] -> 1.85f
+        else -> 1f
+    }
+}
+
+/**
  * 普通 LRC 歌词的逐字涂抹：
- * 由于 LRC 只有行时间，按行的演唱时长把每个字均匀铺开，
- * 进度到达某个字时颜色从暗到高亮平滑过渡，形成连续的“涂抹”效果。
+ * 按 [buildLineTimeline] 给出的每个字真实（估算）起止时间推进颜色，
+ * 唱到哪个字哪个字变绿，字内平滑过渡，形成连续的“涂抹”效果。
  */
 private fun buildProgressiveAnnotatedString(
     text: String,
-    startMs: Long,
-    endMs: Long,
+    timeline: LongArray,
     progressMs: Long,
     dimColor: Color,
     highlightColor: Color
 ): AnnotatedString {
     if (text.isEmpty()) return AnnotatedString("")
-    val chars = text.toList()
-    val duration = (endMs - startMs).coerceAtLeast(1L)
-    val perChar = duration.toFloat() / chars.size
-
     return buildAnnotatedString {
-        chars.forEachIndexed { index, char ->
-            val charStart = startMs + perChar * index
-            val fraction = ((progressMs - charStart) / perChar).coerceIn(0f, 1f)
+        text.forEachIndexed { index, char ->
+            val charStart = timeline[index]
+            val charEnd = timeline.getOrElse(index + 1) { charStart + 1L }
+            val span = (charEnd - charStart).coerceAtLeast(1L)
+            val fraction = ((progressMs - charStart).toFloat() / span).coerceIn(0f, 1f)
             withStyle(SpanStyle(color = lerp(dimColor, highlightColor, fraction))) {
                 append(char)
             }

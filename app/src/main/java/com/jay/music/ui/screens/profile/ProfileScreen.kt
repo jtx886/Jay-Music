@@ -285,7 +285,7 @@ fun ProfileScreen(
         item(key = "version") {
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Jay Music · v1.1.2",
+                text = "Jay Music · v1.1.7",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth(),
